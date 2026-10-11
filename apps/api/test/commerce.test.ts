@@ -79,6 +79,7 @@ test('venda simulada: publicação, taxa, idempotência, isolamento, entrega e r
   const infected = await upload('digital', 'infected.pdf', Buffer.from('%PDF-1.4 EICAR'));
   assert.equal(infected.statusCode, 422);
   await assert.rejects(scanFile(Buffer.from('test'), { ...config, clamavHost: undefined }), { code: 'SCANNER_UNAVAILABLE' });
+  await scanFile(Buffer.from('test'), { ...config, fileScan: 'off', clamavHost: undefined });
   const draftInput = { name: 'Guia digital', description: 'Primeira edição do guia digital.', priceCents: 4990, type: 'digital', paymentMethods: ['pix', 'card'], imageAssetId: image.json().id, digitalAssetId: digital.json().id };
   const product = (await post('/seller/products', draftInput, admin)).json();
   assert.equal((await get(`/checkout/${product.publicId}`)).statusCode, 404);

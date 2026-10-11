@@ -6,6 +6,7 @@ import { AppError } from './domain.ts';
 
 // ClamAV INSTREAM: fail closed on unavailable scanner, timeout or protocol error.
 export async function scanFile(data: Buffer | Readable, config: Config): Promise<void> {
+  if (config.fileScan === 'off') { if (!Buffer.isBuffer(data)) data.destroy(); return; }
   if (!config.clamavHost) throw new AppError('SCANNER_UNAVAILABLE', 'A verificação de arquivos não está configurada.', 503);
   const socket = createConnection({ host: config.clamavHost, port: config.clamavPort });
   const source = Buffer.isBuffer(data) ? Readable.from(chunked(data)) : data;

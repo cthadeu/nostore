@@ -28,6 +28,7 @@ export async function buildApp(config: Config, options: { logger?: boolean } = {
     bodyLimit: 1024 * 1024, requestTimeout: 30_000, trustProxy: false,
     ajv: { customOptions: { removeAdditional: false } },
   });
+  if (config.fileScan === 'off') app.log.warn('Varredura de arquivos desativada (FILE_SCAN=off): uploads são aceitos sem verificação antivírus.');
   await app.register(helmet, { global: true });
   await app.register(cookie);
   await app.register(rateLimit, { max: 120, timeWindow: '1 minute' });
