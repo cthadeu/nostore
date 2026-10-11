@@ -6,6 +6,7 @@
     "dev": "node --env-file=../../.env --watch src/server.ts",
     "start": "node src/server.ts",
     "worker": "node --env-file-if-exists=../../.env src/worker.ts",
+    "build": "prisma generate",
     "db:generate": "prisma generate",
     "db:migrate": "node --env-file-if-exists=../../.env ../../node_modules/prisma/build/index.js migrate deploy",
     "typecheck": "tsc --noEmit",
