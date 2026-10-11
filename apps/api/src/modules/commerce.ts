@@ -3,7 +3,7 @@ import type { Prisma } from '../generated/prisma/client.ts';
 import { ZipFile } from 'yazl';
 import { buyerStamp, stampPdf } from '../lib/pdf-stamp.ts';
 import { applyPaymentStatus } from '../lib/payments.ts';
-import { mapPaymentStatus } from '../lib/mercadopago.ts';
+import { mapPaymentStatus, mpErrorCode } from '../lib/mercadopago.ts';
 import { sellerAccessToken } from '../lib/mp-account.ts';
 import type { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 import { Type } from '@sinclair/typebox';
@@ -156,20 +156,30 @@ export async function commerceRoutes(server: FastifyInstance) {
   type CheckoutBody = { method: 'pix' | 'card'; buyerDocument: string; card?: { token: string; paymentMethodId: string; issuerId?: string } };
   async function chargeWithMercadoPago(orderId: string, seller: Parameters<typeof sellerAccessToken>[1], input: CheckoutBody) {
     const order = await app.db.order.findUniqueOrThrow({ where: { id: orderId }, include: { payment: true } });
-    let payment;
+    let payment, feeApplied = true;
+    const accessToken = await sellerAccessToken(app, seller);
+    const create = (feeCents: number, key: string) => app.mp!.createPayment(accessToken, {
+      amountCents: order.totalCents, feeCents, description: order.productName, orderId, notificationUrl: `${app.config.origin}/api/v1/webhooks/mercadopago`, expiresAt: order.expiresAt,
+      payer: { email: order.buyerEmail, name: order.buyerName, document: input.buyerDocument }, method: input.method,
+      card: input.card ? { token: input.card.token, paymentMethodId: input.card.paymentMethodId, issuerId: input.card.issuerId } : undefined,
+    }, key);
     try {
-      payment = await app.mp!.createPayment(await sellerAccessToken(app, seller), {
-        amountCents: order.totalCents, feeCents: order.feeCents, description: order.productName, orderId, notificationUrl: `${app.config.origin}/api/v1/webhooks/mercadopago`, expiresAt: order.expiresAt,
-        payer: { email: order.buyerEmail, name: order.buyerName, document: input.buyerDocument }, method: input.method,
-        card: input.card ? { token: input.card.token, paymentMethodId: input.card.paymentMethodId, issuerId: input.card.issuerId } : undefined,
-      }, `order-${orderId}`);
+      try { payment = await create(order.feeCents, `order-${orderId}`); }
+      catch (error) {
+        // Code 2059: the seller account cannot pay a marketplace fee (typically the application owner
+        // selling through its own marketplace). The sale goes on without the platform share, flagged.
+        if (!(order.feeCents > 0 && mpErrorCode(error, 2059))) throw error;
+        app.log.warn({ orderId, sellerId: seller.id }, 'Mercado Pago refused application_fee for this seller; charging without the platform share');
+        feeApplied = false;
+        payment = await create(0, `order-${orderId}-nofee`);
+      }
     } catch (error) {
       app.log.error({ err: error, orderId }, 'Mercado Pago payment creation failed');
       await app.db.$transaction(tx => applyPaymentStatus(app, tx, orderId, 'rejected', 'gateway_error'));
       throw new AppError('GATEWAY_ERROR', 'Não foi possível iniciar o pagamento no Mercado Pago. Tente novamente.', 502);
     }
     const data = payment.point_of_interaction?.transaction_data;
-    await app.db.paymentAttempt.update({ where: { orderId }, data: { providerPaymentId: String(payment.id), reference: `mercadopago-${payment.id}`, statusDetail: payment.status_detail ?? null, pixQrCode: data?.qr_code ?? null, pixQrCodeBase64: data?.qr_code_base64 ?? null, pixTicketUrl: data?.ticket_url ?? null, pixExpiresAt: payment.date_of_expiration ? new Date(payment.date_of_expiration) : null } });
+    await app.db.paymentAttempt.update({ where: { orderId }, data: { providerPaymentId: String(payment.id), reference: `mercadopago-${payment.id}`, statusDetail: `${payment.status_detail ?? ''}${feeApplied ? '' : ' (sem application_fee)'}` || null, pixQrCode: data?.qr_code ?? null, pixQrCodeBase64: data?.qr_code_base64 ?? null, pixTicketUrl: data?.ticket_url ?? null, pixExpiresAt: payment.date_of_expiration ? new Date(payment.date_of_expiration) : null } });
     const status = mapPaymentStatus(payment.status);
     const updated = status === 'pending' ? await app.db.order.findUniqueOrThrow({ where: { id: orderId }, include: { payment: true } }) : await app.db.$transaction(tx => applyPaymentStatus(app, tx, orderId, status, payment.status_detail ?? null));
     if (status === 'rejected') throw new AppError('PAYMENT_REJECTED', 'O pagamento não foi aprovado. Confira os dados ou tente outro cartão.', 402);

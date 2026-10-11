@@ -102,4 +102,9 @@ export class MpError extends Error {
   readonly status: number; readonly body: unknown;
   constructor(message: string, status: number, body: unknown = null) { super(message); this.status = status; this.body = body; }
 }
+// Mercado Pago error bodies carry a "cause" list with numeric codes (e.g. 2059: application_fee not allowed).
+export function mpErrorCode(error: unknown, code: number): boolean {
+  const body = error instanceof MpError ? error.body as { cause?: { code?: number | string }[] } | null : null;
+  return Boolean(body?.cause?.some(c => Number(c.code) === code));
+}
 const safeJson = (text: string) => { try { return JSON.parse(text) as unknown; } catch { return text; } };
