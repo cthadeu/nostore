@@ -4,7 +4,7 @@ import type { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 import argon2 from 'argon2';
 import { AppError } from '../lib/domain.ts';
 import { token, hashToken, encrypt } from '../lib/security.ts';
-import { markMailQueued } from '../lib/mailer.ts';
+import { queueMail } from '../lib/commerce.ts';
 import { MessageResponse } from '../lib/schemas.ts';
 import type { Prisma } from '../generated/prisma/client.ts';
 
@@ -15,8 +15,14 @@ export async function queueAuthEmail(tx: Prisma.TransactionClient, app: FastifyI
   const raw = token();
   await tx.authToken.create({ data: { tokenHash: hashToken(raw), userId: user.id, kind, expiresAt: new Date(Date.now() + (kind === 'verify' ? 24 : 1) * 3600_000) } });
   const link = `${app.config.origin}/${kind === 'verify' ? 'verificar-email' : 'redefinir-senha'}#token=${raw}`;
-  await tx.emailJob.create({ data: { payloadEncrypted: encrypt(JSON.stringify({ to: user.email, subject: kind === 'verify' ? 'Confirme seu e-mail · nostore' : 'Redefina sua senha · nostore', text: `Olá!\n\n${kind === 'verify' ? 'Confirme seu e-mail para preparar suas primeiras vendas.' : 'Use o link para definir uma nova senha.'}\n\n${link}\n\nSe não foi você, ignore esta mensagem.\nnostore` }), app.config.encryptionKey) } });
-  markMailQueued();
+  const verify = kind === 'verify';
+  await queueMail(tx, app.config, user.email, {
+    subject: verify ? 'Confirme seu e-mail' : 'Redefina sua senha', eyebrow: verify ? 'Boas-vindas' : 'Acesso à conta',
+    heading: verify ? 'Falta pouco para a sua primeira venda.' : 'Vamos definir uma nova senha.',
+    paragraphs: [verify ? 'Confirme seu e-mail para publicar produtos e receber pedidos.' : 'Use o botão abaixo para escolher uma nova senha. O link vale por 1 hora.'],
+    action: { label: verify ? 'Confirmar e-mail' : 'Redefinir senha', url: link },
+    note: 'Se não foi você, ignore esta mensagem.',
+  });
 }
 async function createSession(app: FastifyInstance, userId: string, reply: FastifyReply) {
   const raw = token(), csrf = token();

@@ -59,9 +59,11 @@ export async function commerceRoutes(server: FastifyInstance) {
           const raw = token();
           const link = await issueAccess(tx, id, app.config, raw, true);
           const mail = paymentConfirmedMail(order, link, order.productType === 'digital' ? `${app.config.origin}/api/v1/buyer/file?token=${raw}` : null);
-          await queueMail(tx, app.config, order.buyerEmail, mail.subject, mail.text);
+          await queueMail(tx, app.config, order.buyerEmail, mail);
         } else {
-          await queueMail(tx, app.config, order.buyerEmail, status === 'refunded' ? '[Teste] Pagamento reembolsado' : '[Teste] Pagamento recusado', `Pedido: ${order.productName}. ${status === 'refunded' ? 'O reembolso foi simulado e o acesso ao download foi revogado.' : 'O pagamento foi recusado na simulação. Você pode iniciar uma nova compra.'} Nenhum valor foi movimentado.`);
+          await queueMail(tx, app.config, order.buyerEmail, status === 'refunded'
+            ? { test: true, eyebrow: 'Reembolso', subject: 'Pagamento reembolsado', heading: 'Seu pagamento foi reembolsado.', paragraphs: ['O reembolso foi registrado e o acesso ao download deste pedido foi encerrado.'], facts: [{ label: 'Produto', value: order.productName }, { label: 'Pedido', value: order.id }] }
+            : { test: true, eyebrow: 'Pagamento', subject: 'Pagamento recusado', heading: 'O pagamento não foi aprovado.', paragraphs: ['Nenhum valor foi movimentado. Se quiser, inicie uma nova compra pelo link do produto.'], facts: [{ label: 'Produto', value: order.productName }, { label: 'Pedido', value: order.id }] });
         }
         return publicOrder(updated);
       });
@@ -145,7 +147,7 @@ export async function commerceRoutes(server: FastifyInstance) {
         payment: { create: { gateway: gateway.name, reference: payment.reference, status: payment.status, method: input.method } },
       }, include: { payment: true } });
       const accessUrl = await issueAccess(tx, id, app.config, input.checkoutToken);
-      await queueMail(tx, app.config, input.buyerEmail, '[Teste] Pedido recebido', `Seu pedido de ${product.name} foi criado e aguarda aprovação simulada pelo vendedor. Nenhum valor será cobrado.\nPedido: ${id}\nAcompanhe: ${accessUrl}`);
+      await queueMail(tx, app.config, input.buyerEmail, { test: gateway.name === 'simulated', eyebrow: 'Pedido recebido', subject: 'Pedido recebido', heading: 'Recebemos seu pedido.', paragraphs: ['Ele aguarda a confirmação do pagamento. Avisaremos por e-mail assim que for aprovado.'], facts: [{ label: 'Produto', value: product.name }, { label: 'Pedido', value: id }], action: { label: 'Acompanhar pedido', url: accessUrl }, note: 'Este link de acompanhamento vale por 24 horas.' });
       return { order: publicOrder(order), accessUrl };
     });
     reply.code(201); return result;
@@ -172,7 +174,7 @@ export async function commerceRoutes(server: FastifyInstance) {
       if (!order) return;
       const paid = order.status === 'paid';
       const link = await issueAccess(tx, order.id, app.config, token(), paid);
-      await queueMail(tx, app.config, order.buyerEmail, `${order.gateway === 'simulated' ? '[Teste] ' : ''}Novo acesso ao pedido`, `Pedido: ${order.id}\nAcesse seu pedido: ${link}\n${paid ? 'Este link é permanente.' : 'Este link vale por 24 horas.'}`);
+      await queueMail(tx, app.config, order.buyerEmail, { test: order.gateway === 'simulated', eyebrow: 'Acesso ao pedido', subject: 'Novo acesso ao pedido', heading: 'Aqui está o seu novo link.', paragraphs: [paid ? 'Este link é permanente: guarde este e-mail para acessar o pedido e os arquivos sempre que precisar.' : 'Este link vale por 24 horas.'], facts: [{ label: 'Produto', value: order.productName }, { label: 'Pedido', value: order.id }], action: { label: 'Acessar pedido', url: link } });
     });
     return { message: 'Se os dados corresponderem a uma compra, enviaremos um novo link por e-mail.' };
   });

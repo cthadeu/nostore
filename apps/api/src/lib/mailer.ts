@@ -23,7 +23,7 @@ export async function drainEmailJobs(db: PrismaClient, transport: Transporter, c
     for (const job of jobs) {
       attempted++;
       try {
-        const mail = JSON.parse(decrypt(job.payloadEncrypted, config.encryptionKey)) as { to: string; subject: string; text: string };
+        const mail = JSON.parse(decrypt(job.payloadEncrypted, config.encryptionKey)) as { to: string; subject: string; text: string; html?: string };
         await transport.sendMail({ ...mail, from: config.smtp.from, messageId: `<${job.id}@nostore.local>` });
         await db.emailJob.update({ where: { id: job.id }, data: { status: 'sent', sentAt: new Date(), payloadEncrypted: '', leaseUntil: null } });
       } catch (error) {
