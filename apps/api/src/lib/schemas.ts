@@ -13,6 +13,6 @@ export const ProductInput = Type.Object({
 }, { additionalProperties: false });
 export const ProductResponse = Type.Object({
   id: Type.String(), publicId: Type.String(), name: Type.String(), description: Type.String(), priceCents: Type.Integer(), type: Type.String(), status: Type.String(),
-  paymentMethods: Type.Array(Type.String()), imageAssetId: Type.Union([Type.String(), Type.Null()]), digitalAssetIds: Type.Array(Type.String()), shippingDays: Type.Union([Type.Integer(), Type.Null()]), updatedAt: Type.String(),
+  paymentMethods: Type.Array(Type.String()), imageAssetId: Type.Union([Type.String(), Type.Null()]), digitalAssetIds: Type.Array(Type.String()), digitalFiles: Type.Array(Type.Object({ id: Type.String(), name: Type.String(), size: Type.Integer() })), shippingDays: Type.Union([Type.Integer(), Type.Null()]), updatedAt: Type.String(),
 });
 export const MessageResponse = Type.Object({ message: Type.String() });

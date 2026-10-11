@@ -11,8 +11,8 @@ import { IdParams, ProductInput, ProductResponse, MessageResponse } from '../lib
 export async function sellerRoutes(server: FastifyInstance) {
   const app = server.withTypeProvider<TypeBoxTypeProvider>();
   // Digital products are bundles of files kept in order.
-  const withFiles = { files: { orderBy: { position: 'asc' as const } } };
-  const present = <T extends { updatedAt: Date; files: { assetId: string }[] }>(product: T) => ({ ...product, digitalAssetIds: product.files.map(f => f.assetId), updatedAt: product.updatedAt.toISOString() });
+  const withFiles = { files: { orderBy: { position: 'asc' as const }, include: { asset: { select: { originalName: true, size: true } } } } };
+  const present = <T extends { updatedAt: Date; files: { assetId: string; asset: { originalName: string; size: number } }[] }>(product: T) => ({ ...product, digitalAssetIds: product.files.map(f => f.assetId), digitalFiles: product.files.map(f => ({ id: f.assetId, name: f.asset.originalName, size: f.asset.size })), updatedAt: product.updatedAt.toISOString() });
   app.addHook('onRequest', app.authenticate);
   app.get('/profile', async (request) => {
     const seller = await app.db.seller.findUniqueOrThrow({ where: { id: request.identity!.sellerId }, include: { user: true } });
