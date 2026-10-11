@@ -34,3 +34,8 @@ export async function drainEmailJobs(db: PrismaClient, transport: Transporter, c
   }
   return attempted;
 }
+
+// Set by queueMail/queueAuthEmail so inline delivery only runs on requests that queued something.
+let mailQueued = false;
+export function markMailQueued(): void { mailQueued = true; }
+export function takeMailQueued(): boolean { const queued = mailQueued; mailQueued = false; return queued; }

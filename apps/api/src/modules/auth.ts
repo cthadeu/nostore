@@ -4,6 +4,7 @@ import type { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 import argon2 from 'argon2';
 import { AppError } from '../lib/domain.ts';
 import { token, hashToken, encrypt } from '../lib/security.ts';
+import { markMailQueued } from '../lib/mailer.ts';
 import { MessageResponse } from '../lib/schemas.ts';
 import type { Prisma } from '../generated/prisma/client.ts';
 
@@ -15,6 +16,7 @@ export async function queueAuthEmail(tx: Prisma.TransactionClient, app: FastifyI
   await tx.authToken.create({ data: { tokenHash: hashToken(raw), userId: user.id, kind, expiresAt: new Date(Date.now() + (kind === 'verify' ? 24 : 1) * 3600_000) } });
   const link = `${app.config.origin}/${kind === 'verify' ? 'verificar-email' : 'redefinir-senha'}#token=${raw}`;
   await tx.emailJob.create({ data: { payloadEncrypted: encrypt(JSON.stringify({ to: user.email, subject: kind === 'verify' ? 'Confirme seu e-mail · nostore' : 'Redefina sua senha · nostore', text: `Olá!\n\n${kind === 'verify' ? 'Confirme seu e-mail para preparar suas primeiras vendas.' : 'Use o link para definir uma nova senha.'}\n\n${link}\n\nSe não foi você, ignore esta mensagem.\nnostore` }), app.config.encryptionKey) } });
+  markMailQueued();
 }
 async function createSession(app: FastifyInstance, userId: string, reply: FastifyReply) {
   const raw = token(), csrf = token();

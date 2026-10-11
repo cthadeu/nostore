@@ -2,6 +2,7 @@ import type { Prisma, Order } from '../generated/prisma/client.ts';
 import type { Config } from './config.ts';
 import { encrypt, hashToken, token } from './security.ts';
 import { AppError } from './domain.ts';
+import { markMailQueued } from './mailer.ts';
 
 export const day = 86_400_000;
 export function downloadDeadline() { const date = new Date(); date.setUTCFullYear(date.getUTCFullYear() + 1); return date; }
@@ -17,6 +18,7 @@ export const publicOrder = (order: Order & { payment: { method: string } | null 
 });
 export async function queueMail(tx: Prisma.TransactionClient, config: Config, to: string, subject: string, text: string) {
   await tx.emailJob.create({ data: { payloadEncrypted: encrypt(JSON.stringify({ to, subject, text }), config.encryptionKey) } });
+  markMailQueued();
 }
 export async function issueAccess(tx: Prisma.TransactionClient, orderId: string, config: Config, raw = token()) {
   await tx.accessGrant.create({ data: { orderId, tokenHash: hashToken(raw), expiresAt: new Date(Date.now() + day) } });

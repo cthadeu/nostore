@@ -10,8 +10,7 @@ import type { PrismaClient } from './generated/prisma/client.ts';
 import type { Config } from './lib/config.ts';
 import { createDb } from './lib/db.ts';
 import { createStorage, type ObjectStorage } from './lib/storage.ts';
-import { createTransport, drainEmailJobs } from './lib/mailer.ts';
-import { waitUntil } from '@vercel/functions';
+import { createTransport, drainEmailJobs, takeMailQueued } from './lib/mailer.ts';
 import { AppError } from './lib/domain.ts';
 import { hashToken, matchesHash } from './lib/security.ts';
 import { authRoutes } from './modules/auth.ts';
@@ -59,13 +58,15 @@ export async function buildApp(config: Config, options: { logger?: boolean } = {
     });
   }, { name: 'authentication', dependencies: ['database'] }));
   if (config.mailDelivery === 'inline') {
-    // No long-lived worker on Vercel: drain the e-mail queue after each mutating request, off the
-    // response path. waitUntil keeps the function alive on Vercel and is a no-op elsewhere.
+    // No long-lived worker on serverless hosts, and background work after the response is frozen
+    // with the function. Drain the queue before replying, only on requests that queued an e-mail.
     const transport = createTransport(config);
     app.addHook('onClose', async () => { transport.close(); });
-    app.addHook('onResponse', async (request) => {
-      if (['GET', 'HEAD', 'OPTIONS'].includes(request.method)) return;
-      waitUntil(drainEmailJobs(app.db, transport, config).catch((error: unknown) => { request.log.error({ err: error }, 'E-mail queue drain failed'); }));
+    app.addHook('onSend', async (request, _reply, payload) => {
+      if (!takeMailQueued()) return payload;
+      try { await drainEmailJobs(app.db, transport, config); }
+      catch (error) { request.log.error({ err: error }, 'E-mail queue drain failed'); }
+      return payload;
     });
   }
   app.addHook('onRequest', async (request, reply) => {
