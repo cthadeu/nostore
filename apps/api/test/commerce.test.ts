@@ -11,6 +11,7 @@ import { getConfig } from '../src/lib/config.ts';
 import { token, hashToken, decrypt } from '../src/lib/security.ts';
 import { gatewayFor } from '../src/lib/gateway.ts';
 import { scanFile } from '../src/lib/scanner.ts';
+import { PDFDocument } from 'pdf-lib';
 const databaseUrl = process.env.TEST_DATABASE_URL;
 
 test('venda simulada: publicação, taxa, idempotência, isolamento, entrega e revogação', { skip: !databaseUrl }, async t => {
@@ -178,6 +179,25 @@ test('venda simulada: publicação, taxa, idempotência, isolamento, entrega e r
   assert.ok(String(zip.headers['content-disposition']).includes('.zip'), 'pacote vem como ZIP');
   assert.equal(zip.rawPayload.subarray(0, 4).toString('hex'), '504b0304', 'resposta começa com assinatura ZIP');
   assert.ok(zip.rawPayload.includes('v2.pdf') && zip.rawPayload.includes('bonus.pdf') && zip.rawPayload.includes('segunda versão'), 'ZIP contém os dois arquivos');
+  // Personalized PDFs: buyer name and document stamped on every page, snapshotted on the order.
+  const realPdf = await PDFDocument.create(); realPdf.addPage([300, 200]); realPdf.addPage([300, 200]);
+  const stampedAsset = (await upload('digital', 'licenciado.pdf', Buffer.from(await realPdf.save()))).json();
+  const stampedProduct = (await post('/seller/products', { ...draftInput, name: 'Guia personalizado', digitalAssetIds: [stampedAsset.id], stampBuyer: true }, admin)).json();
+  assert.equal(stampedProduct.stampBuyer, true);
+  assert.equal((await post(`/seller/products/${stampedProduct.id}/publish`, {}, admin)).statusCode, 200);
+  const stampedOffer = (await get(`/checkout/${stampedProduct.publicId}`)).json();
+  const stampedToken = token();
+  const stampedOrder = (await post('/checkout/orders', { ...input, productId: stampedProduct.publicId, checkoutToken: stampedToken, feePolicyId: stampedOffer.feePolicy.id, productVersion: stampedOffer.version })).json().order;
+  assert.equal((await post(`/seller/orders/${stampedOrder.id}/simulate`, { outcome: 'paid' }, admin)).statusCode, 200);
+  const stampedTicket = (await post('/buyer/download-ticket', { token: stampedToken })).json();
+  const stampedDownload = await app.inject({ method: 'GET', url: stampedTicket.url });
+  assert.equal(stampedDownload.statusCode, 200);
+  const delivered = await PDFDocument.load(stampedDownload.rawPayload);
+  assert.equal(delivered.getPageCount(), 2, 'mesmo número de páginas');
+  assert.ok(stampedDownload.rawPayload.includes('Helvetica'), 'fonte do carimbo embutida');
+  assert.ok(stampedDownload.rawPayload.length > (await realPdf.save()).length, 'PDF entregue é o carimbado, não o original');
+  assert.equal(Number(stampedDownload.headers['content-length']), stampedDownload.rawPayload.length);
+  await post(`/seller/products/${stampedProduct.id}/pause`, {}, admin); // keep the active-product count unchanged for the limit test below
   const physicalProduct = (await post('/seller/products', { ...draftInput, name: 'Produto físico', type: 'physical', digitalAssetIds: [], shippingDays: 3 }, admin)).json();
   await post(`/seller/products/${physicalProduct.id}/publish`, {}, admin);
   const physicalOffer = (await get(`/checkout/${physicalProduct.publicId}`)).json();

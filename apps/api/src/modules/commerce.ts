@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import type { Prisma } from '../generated/prisma/client.ts';
 import { ZipFile } from 'yazl';
+import { buyerStamp, stampPdf } from '../lib/pdf-stamp.ts';
 import type { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 import { Type } from '@sinclair/typebox';
 import { randomUUID } from 'node:crypto';
@@ -136,6 +137,7 @@ export async function commerceRoutes(server: FastifyInstance) {
       const order = await tx.order.create({ data: {
         id, sellerId: product.sellerId, productId: product.id, productName: product.name, productType: product.type,
         files: { create: product.type === 'digital' ? product.files.map(f => ({ assetId: f.assetId, position: f.position })) : [] },
+        stampBuyer: product.type === 'digital' && product.stampBuyer,
         buyerName: input.buyerName, buyerEmail: input.buyerEmail, buyerDocumentEncrypted: encrypt(input.buyerDocument, app.config.encryptionKey),
         addressEncrypted: product.type === 'physical' ? encrypt(JSON.stringify(input.address), app.config.encryptionKey) : null,
         ...amounts, feePolicyId: fee.id, feeBasisPoints: fee.basisPoints, gateway: gateway.name, checkoutKeyHash: keyHash, requestHash,
@@ -195,13 +197,13 @@ export async function commerceRoutes(server: FastifyInstance) {
       if (!claimed.count) throw new AppError('DOWNLOAD_EXPIRED', 'Este link expirou ou já foi utilizado. Gere outro na página do pedido.', 403);
       return { order, assets };
     });
-    return sendBundle(reply, order.productName, assets);
+    return sendBundle(reply, order, assets);
   });
   // Permanent download link sent by e-mail: the access token identifies a paid digital order.
   app.get('/buyer/file', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } }, schema: { querystring: Type.Object({ token: Type.String({ pattern: '^[a-f0-9]{64}$' }) }, { additionalProperties: false }) } }, async (request, reply) => {
     const order = await authorizeOrder(app.db, request.query.token);
     if (order.status !== 'paid' || !order.files.length || !order.downloadUntil || order.downloadUntil <= new Date()) throw new AppError('DOWNLOAD_FORBIDDEN', 'O download não está disponível para este pedido.', 403);
-    return sendBundle(reply, order.productName, await orderAssets(app.db, order));
+    return sendBundle(reply, order, await orderAssets(app.db, order));
   });
   // Resolves the files bought with an order, in bundle order, and fails if any is no longer approved.
   async function orderAssets(db: Pick<Prisma.TransactionClient, 'asset'>, order: { sellerId: string; files: { assetId: string; position: number }[] }) {
@@ -212,13 +214,31 @@ export async function commerceRoutes(server: FastifyInstance) {
     return [...order.files].sort((a, b) => a.position - b.position).map(f => byId.get(f.assetId)!);
   }
   const disposition = (name: string) => `attachment; filename*=UTF-8''${encodeURIComponent(name).replace(/'/g, '%27')}`;
+  type Deliverable = { storageKey: string; originalName: string; size: number; mimeType: string };
+  // When the product asks for it, PDFs get the buyer's name and document stamped on every page.
+  // Other formats pass through untouched; a PDF that cannot be parsed is delivered as uploaded.
+  async function deliverable(order: { id: string; stampBuyer: boolean; buyerName: string; buyerDocumentEncrypted: string }, asset: Deliverable): Promise<{ body: Buffer | import('node:stream').Readable; size?: number }> {
+    const stream = await app.storage.get(asset.storageKey);
+    if (!order.stampBuyer || asset.mimeType !== 'application/pdf') return { body: stream, size: asset.size };
+    const chunks: Buffer[] = []; for await (const chunk of stream) chunks.push(chunk as Buffer);
+    const original = Buffer.concat(chunks);
+    try {
+      const stamped = Buffer.from(await stampPdf(original, buyerStamp({ name: order.buyerName, document: decrypt(order.buyerDocumentEncrypted, app.config.encryptionKey) })));
+      return { body: stamped, size: stamped.length };
+    } catch (error) {
+      app.log.warn({ err: error, orderId: order.id, storageKey: asset.storageKey }, 'PDF stamping failed; delivering the original file');
+      return { body: original, size: original.length };
+    }
+  }
   // A single file is sent as is; a bundle is streamed as one ZIP (stored, the files are already compressed formats).
-  async function sendBundle(reply: FastifyReply, productName: string, assets: { storageKey: string; originalName: string; size: number }[]) {
+  async function sendBundle(reply: FastifyReply, order: { id: string; productName: string; stampBuyer: boolean; buyerName: string; buyerDocumentEncrypted: string }, assets: Deliverable[]) {
     reply.header('Referrer-Policy', 'no-referrer').type('application/octet-stream');
     if (assets.length === 1) {
       const asset = assets[0]!;
-      reply.header('Content-Disposition', disposition(asset.originalName)).header('Content-Length', asset.size);
-      return reply.send(await app.storage.get(asset.storageKey));
+      const { body, size } = await deliverable(order, asset);
+      reply.header('Content-Disposition', disposition(asset.originalName));
+      if (size !== undefined) reply.header('Content-Length', size);
+      return reply.send(body);
     }
     const zip = new ZipFile();
     const names = new Set<string>();
@@ -226,10 +246,11 @@ export async function commerceRoutes(server: FastifyInstance) {
       let name = asset.originalName.replace(/[\\/]+/g, '_').trim() || 'arquivo';
       for (let n = 2; names.has(name); n++) name = asset.originalName.replace(/(\.[^.]*)?$/, `-${n}$1`);
       names.add(name);
-      zip.addReadStream(await app.storage.get(asset.storageKey), name, { compress: false });
+      const { body } = await deliverable(order, asset);
+      if (Buffer.isBuffer(body)) zip.addBuffer(body, name, { compress: false }); else zip.addReadStream(body, name, { compress: false });
     }
     zip.end();
-    reply.header('Content-Disposition', disposition(`${productName.replace(/[\\/]+/g, '_').trim() || 'pacote'}.zip`));
+    reply.header('Content-Disposition', disposition(`${order.productName.replace(/[\\/]+/g, '_').trim() || 'pacote'}.zip`));
     return reply.send(zip.outputStream);
   }
 }

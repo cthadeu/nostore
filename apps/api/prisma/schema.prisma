@@ -72,6 +72,8 @@ model Product {
   updatedAt DateTime @updatedAt
   @@index([sellerId, createdAt])
   orders Order[]
+  // Stamp buyer name and document on PDF pages at download time.
+  stampBuyer Boolean @default(false)
   files ProductFile[]
   @@index([sellerId, status])
 }
@@ -139,6 +141,7 @@ model Order {
   buyerSessions BuyerSession[]
   accessGrants AccessGrant[]
   downloadTickets DownloadTicket[]
+  stampBuyer Boolean @default(false)
   files OrderFile[]
   @@index([sellerId, createdAt])
   @@index([sellerId, status])

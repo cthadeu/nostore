@@ -83,7 +83,7 @@ O Compose usa `PAYMENT_GATEWAY=simulated` por padrão. Nenhum dinheiro é movime
 
 1. Execute `./scripts/docker-up.sh` e aguarde o ClamAV iniciar e carregar suas assinaturas (a primeira execução pode demorar alguns minutos e exige acesso à internet).
 2. Cadastre uma conta e confirme o e-mail pelo Mailpit em http://localhost:8025.
-3. Crie um produto com imagem e um ou mais arquivos PDF/ZIP/EPUB. Vários arquivos formam um pacote, entregue ao comprador como um único ZIP. Cada arquivo passa pelo ClamAV (salvo com `FILE_SCAN=off`); se o scanner estiver indisponível, o upload falha sem liberar o arquivo.
+3. Crie um produto com imagem e um ou mais arquivos PDF/ZIP/EPUB. Vários arquivos formam um pacote, entregue ao comprador como um único ZIP. A opção "Personalizar PDFs" carimba nome e CPF/CNPJ do comprador no rodapé de cada página dos PDFs no momento do download. Cada arquivo passa pelo ClamAV (salvo com `FILE_SCAN=off`); se o scanner estiver indisponível, o upload falha sem liberar o arquivo.
 4. Salve e clique em **Publicar produto**. Copie o link ou use **Abrir checkout**.
 5. No checkout, informe dados de teste, selecione Pix ou cartão simulado e crie o pedido. O CPF fictício `529.982.247-25` pode ser usado no teste. Nenhum dado de cartão é solicitado.
 6. Na conta do vendedor, abra **Pedidos → Simular aprovação**. O comprador recebe e-mails e sua página de pedido passa a oferecer o download.
