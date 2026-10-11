@@ -2,6 +2,9 @@ import type { FastifyInstance, FastifyReply } from 'fastify';
 import type { Prisma } from '../generated/prisma/client.ts';
 import { ZipFile } from 'yazl';
 import { buyerStamp, stampPdf } from '../lib/pdf-stamp.ts';
+import { applyPaymentStatus } from '../lib/payments.ts';
+import { mapPaymentStatus } from '../lib/mercadopago.ts';
+import { sellerAccessToken } from '../lib/mp-account.ts';
 import type { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 import { Type } from '@sinclair/typebox';
 import { randomUUID } from 'node:crypto';
@@ -43,30 +46,24 @@ export async function commerceRoutes(server: FastifyInstance) {
     });
     seller.post('/seller/orders/:id/simulate', { schema: { params: IdParams, body: Type.Object({ outcome: Type.Union([Type.Literal('paid'), Type.Literal('rejected'), Type.Literal('refunded')]) }, { additionalProperties: false }), response: { 200: OrderResponse } } }, async request => {
       const gateway = gatewayFor(app.config);
+      if (!gateway.simulate) throw new AppError('NOT_FOUND', 'Simulação indisponível neste ambiente.', 404);
       return app.db.$transaction(async tx => {
         const id = request.params.id;
-        await tx.$queryRaw`SELECT id FROM "Order" WHERE id = ${id}::uuid FOR UPDATE`;
         const order = await tx.order.findFirst({ where: { id, sellerId: request.identity!.sellerId }, include: { payment: true } });
         if (!order || order.gateway !== gateway.name || !order.payment) throw new AppError('NOT_FOUND', 'Pedido de teste não encontrado.', 404);
         if (order.status === 'pending' && order.expiresAt <= new Date()) throw new AppError('ORDER_EXPIRED', 'Este pedido expirou. Inicie outro checkout.', 409);
-        const status = gateway.simulate(order.status, request.body.outcome);
-        if (order.status === status) return publicOrder(order);
-        const paid = status === 'paid';
-        const updated = await tx.order.update({ where: { id }, data: { status, ...(paid ? { paidAt: new Date(), downloadUntil: downloadDeadline() } : {}) }, include: { payment: true } });
-        await tx.paymentAttempt.update({ where: { orderId: id }, data: { status } });
-        if (paid) {
-          // One e-mail with the confirmation and a permanent link; digital orders also get a direct download URL.
-          const raw = token();
-          const link = await issueAccess(tx, id, app.config, raw, true);
-          const mail = paymentConfirmedMail(order, link, order.productType === 'digital' ? `${app.config.origin}/api/v1/buyer/file?token=${raw}` : null);
-          await queueMail(tx, app.config, order.buyerEmail, mail);
-        } else {
-          await queueMail(tx, app.config, order.buyerEmail, status === 'refunded'
-            ? { test: true, eyebrow: 'Reembolso', subject: 'Pagamento reembolsado', heading: 'Seu pagamento foi reembolsado.', paragraphs: ['O reembolso foi registrado e o acesso ao download deste pedido foi encerrado.'], facts: [{ label: 'Produto', value: order.productName }, { label: 'Pedido', value: order.id }] }
-            : { test: true, eyebrow: 'Pagamento', subject: 'Pagamento recusado', heading: 'O pagamento não foi aprovado.', paragraphs: ['Nenhum valor foi movimentado. Se quiser, inicie uma nova compra pelo link do produto.'], facts: [{ label: 'Produto', value: order.productName }, { label: 'Pedido', value: order.id }] });
-        }
-        return publicOrder(updated);
+        return publicOrder(await applyPaymentStatus(app, tx, id, gateway.simulate!(order.status, request.body.outcome)));
       });
+    });
+    // Real refunds go through the provider; its webhook later confirms the same transition idempotently.
+    seller.post('/seller/orders/:id/refund', { schema: { params: IdParams, response: { 200: OrderResponse } } }, async request => {
+      const order = await app.db.order.findFirst({ where: { id: request.params.id, sellerId: request.identity!.sellerId }, include: { payment: true, seller: true } });
+      if (!order || !order.payment) throw new AppError('NOT_FOUND', 'Pedido não encontrado.', 404);
+      if (order.gateway !== 'mercadopago' || !app.mp) throw new AppError('REFUND_UNAVAILABLE', 'Reembolso disponível apenas para pagamentos pelo Mercado Pago.', 409);
+      if (order.status !== 'paid' || !order.payment.providerPaymentId) throw new AppError('INVALID_TRANSITION', 'Só é possível reembolsar pagamentos aprovados.', 409);
+      try { await app.mp.refundPayment(await sellerAccessToken(app, order.seller), order.payment.providerPaymentId, `refund-${order.id}`); }
+      catch (error) { request.log.error({ err: error, orderId: order.id }, 'Mercado Pago refund failed'); throw new AppError('GATEWAY_ERROR', 'O Mercado Pago não concluiu o reembolso. Tente novamente em instantes.', 502); }
+      return publicOrder(await app.db.$transaction(tx => applyPaymentStatus(app, tx, order.id, 'refunded', 'refunded_by_seller')));
     });
     await seller.register(async adminScoped => {
       const admin = adminScoped.withTypeProvider<TypeBoxTypeProvider>();
@@ -92,14 +89,14 @@ export async function commerceRoutes(server: FastifyInstance) {
     });
   });
 
-  const CheckoutResponse = Type.Object({ publicId: Type.String(), version: Type.String(), name: Type.String(), description: Type.String(), type: Type.String(), sellerName: Type.String(), imageUrl: Type.String(), paymentMethods: Type.Array(Type.String()), priceCents: Type.Integer(), feeCents: Type.Integer(), totalCents: Type.Integer(), feePolicy: FeeResponse, gateway: Type.String(), shippingDays: Type.Union([Type.Integer(), Type.Null()]) });
+  const CheckoutResponse = Type.Object({ publicId: Type.String(), publicKey: Type.Union([Type.String(), Type.Null()]), version: Type.String(), name: Type.String(), description: Type.String(), type: Type.String(), sellerName: Type.String(), imageUrl: Type.String(), paymentMethods: Type.Array(Type.String()), priceCents: Type.Integer(), feeCents: Type.Integer(), totalCents: Type.Integer(), feePolicy: FeeResponse, gateway: Type.String(), shippingDays: Type.Union([Type.Integer(), Type.Null()]) });
   app.get('/checkout/:id', { schema: { params: IdParams, response: { 200: CheckoutResponse } } }, async request => {
     const gateway = gatewayFor(app.config);
     const [product, fee] = await Promise.all([
       app.db.product.findFirst({ where: { publicId: request.params.id, status: 'active', seller: { moderationStatus: 'active' } }, include: { seller: true } }), currentFee(app.db),
     ]);
-    if (!product) throw new AppError('NOT_FOUND', 'Este produto não está disponível para compra.', 404);
-    return { publicId: product.publicId, version: product.updatedAt.toISOString(), name: product.name, description: product.description, type: product.type, sellerName: product.seller.displayName, imageUrl: `/api/v1/checkout/${product.publicId}/image`, paymentMethods: product.paymentMethods, ...calculateFee(product.priceCents, fee.basisPoints), feePolicy: { ...fee, createdAt: fee.createdAt.toISOString() }, gateway: gateway.name, shippingDays: product.shippingDays };
+    if (!product || (gateway.name === 'mercadopago' && (product.seller.gatewayStatus !== 'connected' || !product.seller.mpPublicKey))) throw new AppError('NOT_FOUND', 'Este produto não está disponível para compra.', 404);
+    return { publicId: product.publicId, publicKey: gateway.name === 'mercadopago' ? product.seller.mpPublicKey : null, version: product.updatedAt.toISOString(), name: product.name, description: product.description, type: product.type, sellerName: product.seller.displayName, imageUrl: `/api/v1/checkout/${product.publicId}/image`, paymentMethods: product.paymentMethods, ...calculateFee(product.priceCents, fee.basisPoints), feePolicy: { ...fee, createdAt: fee.createdAt.toISOString() }, gateway: gateway.name, shippingDays: product.shippingDays };
   });
   app.get('/checkout/:id/image', { schema: { params: IdParams } }, async (request, reply) => {
     const product = await app.db.product.findFirst({ where: { publicId: request.params.id, status: 'active', seller: { moderationStatus: 'active' } } });
@@ -120,7 +117,7 @@ export async function commerceRoutes(server: FastifyInstance) {
       const existing = await tx.order.findUnique({ where: { checkoutKeyHash: keyHash }, include: { payment: true } });
       if (existing) {
         if (existing.requestHash !== requestHash) throw new AppError('CHECKOUT_CONFLICT', 'Os dados desta compra mudaram. Inicie um novo checkout.', 409);
-        return { order: publicOrder(existing), accessUrl: `${app.config.origin}/pedido#token=${input.checkoutToken}` };
+        return { order: publicOrder(existing), accessUrl: `${app.config.origin}/pedido#token=${input.checkoutToken}`, created: false as const, seller: undefined };
       }
       const candidate = await tx.product.findUnique({ where: { publicId: input.productId } });
       if (!candidate) throw new AppError('NOT_FOUND', 'Produto indisponível.', 404);
@@ -132,10 +129,12 @@ export async function commerceRoutes(server: FastifyInstance) {
       if (fee.id !== input.feePolicyId || product.updatedAt.toISOString() !== input.productVersion) throw new AppError('PRICE_CHANGED', 'As condições do produto mudaram. Atualize o checkout antes de continuar.', 409);
       if (!product.paymentMethods.includes(input.method)) throw new AppError('METHOD_INVALID', 'Forma de pagamento indisponível.');
       if (product.type === 'physical' && !input.address) throw new AppError('ADDRESS_REQUIRED', 'Informe o endereço de entrega.');
+      if (gateway.name === 'simulated' && input.acceptSimulation !== true) throw new AppError('SIMULATION_CONSENT', 'Confirme que esta é uma compra de teste.');
+      if (gateway.name === 'mercadopago' && (product.seller.gatewayStatus !== 'connected' || !product.seller.mpAccessTokenEncrypted)) throw new AppError('PRODUCT_UNAVAILABLE', 'Produto indisponível.', 409);
+      if (gateway.name === 'mercadopago' && input.method === 'card' && !input.card) throw new AppError('CARD_REQUIRED', 'Informe os dados do cartão.');
       if (product.type === 'digital' && (!product.files.length || await tx.asset.count({ where: { id: { in: product.files.map(f => f.assetId) }, sellerId: product.sellerId, status: 'approved', kind: 'digital' } }) !== product.files.length)) throw new AppError('FILE_UNAVAILABLE', 'Arquivo indisponível para venda.', 409);
       const id = randomUUID();
       const amounts = calculateFee(product.priceCents, fee.basisPoints);
-      const payment = gateway.create({ orderId: id, ...amounts, sellerCents: amounts.priceCents, method: input.method });
       const order = await tx.order.create({ data: {
         id, sellerId: product.sellerId, productId: product.id, productName: product.name, productType: product.type,
         files: { create: product.type === 'digital' ? product.files.map(f => ({ assetId: f.assetId, position: f.position })) : [] },
@@ -144,14 +143,38 @@ export async function commerceRoutes(server: FastifyInstance) {
         addressEncrypted: product.type === 'physical' ? encrypt(JSON.stringify(input.address), app.config.encryptionKey) : null,
         ...amounts, feePolicyId: fee.id, feeBasisPoints: fee.basisPoints, gateway: gateway.name, checkoutKeyHash: keyHash, requestHash,
         expiresAt: new Date(Date.now() + 30 * 60_000),
-        payment: { create: { gateway: gateway.name, reference: payment.reference, status: payment.status, method: input.method } },
+        payment: { create: { gateway: gateway.name, reference: `${gateway.name}-${id}`, status: 'pending', method: input.method } },
       }, include: { payment: true } });
       const accessUrl = await issueAccess(tx, id, app.config, input.checkoutToken);
       await queueMail(tx, app.config, input.buyerEmail, { test: gateway.name === 'simulated', eyebrow: 'Pedido recebido', subject: 'Pedido recebido', heading: 'Recebemos seu pedido.', paragraphs: ['Ele aguarda a confirmação do pagamento. Avisaremos por e-mail assim que for aprovado.'], facts: [{ label: 'Produto', value: product.name }, { label: 'Pedido', value: id }], action: { label: 'Acompanhar pedido', url: accessUrl }, note: 'Este link de acompanhamento vale por 24 horas.' });
-      return { order: publicOrder(order), accessUrl };
+      return { order: publicOrder(order), accessUrl, created: true as const, seller: product.seller };
     });
-    reply.code(201); return result;
+    // The provider call happens outside the transaction: no locks held across the network.
+    if (gateway.name === 'mercadopago' && result.created) result.order = publicOrder(await chargeWithMercadoPago(result.order.id, result.seller, input));
+    reply.code(201); return { order: result.order, accessUrl: result.accessUrl };
   });
+  type CheckoutBody = { method: 'pix' | 'card'; buyerDocument: string; card?: { token: string; paymentMethodId: string; issuerId?: string } };
+  async function chargeWithMercadoPago(orderId: string, seller: Parameters<typeof sellerAccessToken>[1], input: CheckoutBody) {
+    const order = await app.db.order.findUniqueOrThrow({ where: { id: orderId }, include: { payment: true } });
+    let payment;
+    try {
+      payment = await app.mp!.createPayment(await sellerAccessToken(app, seller), {
+        amountCents: order.totalCents, feeCents: order.feeCents, description: order.productName, orderId, notificationUrl: `${app.config.origin}/api/v1/webhooks/mercadopago`, expiresAt: order.expiresAt,
+        payer: { email: order.buyerEmail, name: order.buyerName, document: input.buyerDocument }, method: input.method,
+        card: input.card ? { token: input.card.token, paymentMethodId: input.card.paymentMethodId, issuerId: input.card.issuerId } : undefined,
+      }, `order-${orderId}`);
+    } catch (error) {
+      app.log.error({ err: error, orderId }, 'Mercado Pago payment creation failed');
+      await app.db.$transaction(tx => applyPaymentStatus(app, tx, orderId, 'rejected', 'gateway_error'));
+      throw new AppError('GATEWAY_ERROR', 'Não foi possível iniciar o pagamento no Mercado Pago. Tente novamente.', 502);
+    }
+    const data = payment.point_of_interaction?.transaction_data;
+    await app.db.paymentAttempt.update({ where: { orderId }, data: { providerPaymentId: String(payment.id), reference: `mercadopago-${payment.id}`, statusDetail: payment.status_detail ?? null, pixQrCode: data?.qr_code ?? null, pixQrCodeBase64: data?.qr_code_base64 ?? null, pixTicketUrl: data?.ticket_url ?? null, pixExpiresAt: payment.date_of_expiration ? new Date(payment.date_of_expiration) : null } });
+    const status = mapPaymentStatus(payment.status);
+    const updated = status === 'pending' ? await app.db.order.findUniqueOrThrow({ where: { id: orderId }, include: { payment: true } }) : await app.db.$transaction(tx => applyPaymentStatus(app, tx, orderId, status, payment.status_detail ?? null));
+    if (status === 'rejected') throw new AppError('PAYMENT_REJECTED', 'O pagamento não foi aprovado. Confira os dados ou tente outro cartão.', 402);
+    return updated;
+  }
   // The access link is exchanged via POST, then the browser removes the fragment.
   app.post('/buyer/session', { schema: { body: AccessBody, response: { 200: MessageResponse } } }, async (request, reply) => {
     const order = await authorizeOrder(app.db, request.body.token);

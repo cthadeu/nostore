@@ -30,6 +30,13 @@ model Seller {
   proUntil DateTime?
   moderationStatus String @default("active")
   gatewayStatus String @default("not_connected")
+  // Mercado Pago account linked by OAuth (tokens encrypted at rest).
+  mpUserId String?
+  mpPublicKey String?
+  mpAccessTokenEncrypted String?
+  mpRefreshTokenEncrypted String?
+  mpTokenExpiresAt DateTime?
+  mpConnectedAt DateTime?
   createdAt DateTime @default(now())
   orders Order[]
   products Product[]
@@ -154,7 +161,30 @@ model PaymentAttempt {
   reference String @unique
   method String
   status String @default("pending")
+  // Provider-side data (Mercado Pago): payment id, last status detail and Pix QR code while pending.
+  providerPaymentId String? @unique
+  statusDetail String?
+  pixQrCode String?
+  pixQrCodeBase64 String?
+  pixTicketUrl String?
+  pixExpiresAt DateTime?
   updatedAt DateTime @updatedAt
+}
+// Every provider notification is stored once (idempotent on request id) and reprocessable.
+model GatewayEvent {
+  id String @id @default(uuid()) @db.Uuid
+  provider String
+  requestId String
+  topic String
+  action String?
+  resourceId String?
+  payload String
+  status String @default("received")
+  error String?
+  createdAt DateTime @default(now())
+  processedAt DateTime?
+  @@unique([provider, requestId])
+  @@index([provider, resourceId])
 }
 model AccessGrant {
   id String @id @default(uuid()) @db.Uuid

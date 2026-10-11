@@ -3,7 +3,8 @@ export interface Config {
   databaseUrl: string; origin: string; production: boolean; port: number;
   encryptionKey: string; storageDir: string;
   fileStorage: 'local' | 'blob';
-  paymentGateway: 'disabled' | 'simulated'; allowSimulatedPayments: boolean; adminEmails: string[];
+  paymentGateway: 'disabled' | 'simulated' | 'mercadopago'; allowSimulatedPayments: boolean; adminEmails: string[];
+  mercadoPago?: { clientId: string; clientSecret: string; webhookSecret?: string };
   clamavHost?: string; clamavPort: number; fileScan: 'clamav' | 'off';
   mailDelivery: 'worker' | 'inline'; smtp: { host: string; port: number; user?: string; password?: string; from: string };
 }
@@ -23,8 +24,14 @@ export function getConfig(): Config {
   const fileScan = process.env.FILE_SCAN ?? 'clamav';
   if (fileScan !== 'clamav' && fileScan !== 'off') throw new Error('FILE_SCAN deve ser clamav ou off.');
   const paymentGateway = process.env.PAYMENT_GATEWAY ?? 'disabled';
-  if (paymentGateway !== 'disabled' && paymentGateway !== 'simulated') throw new Error('PAYMENT_GATEWAY inválido.');
+  if (paymentGateway !== 'disabled' && paymentGateway !== 'simulated' && paymentGateway !== 'mercadopago') throw new Error('PAYMENT_GATEWAY inválido.');
+  let mercadoPago: Config['mercadoPago'];
+  if (paymentGateway === 'mercadopago') {
+    const clientId = process.env.MP_CLIENT_ID, clientSecret = process.env.MP_CLIENT_SECRET;
+    if (!clientId || !clientSecret) throw new Error('MP_CLIENT_ID e MP_CLIENT_SECRET são obrigatórios com PAYMENT_GATEWAY=mercadopago.');
+    mercadoPago = { clientId, clientSecret, webhookSecret: process.env.MP_WEBHOOK_SECRET || undefined };
+  }
   const allowSimulatedPayments = process.env.ALLOW_SIMULATED_PAYMENTS === 'true';
   if (production && paymentGateway === 'simulated' && !allowSimulatedPayments) throw new Error('Gateway simulado não é permitido em produção. Defina ALLOW_SIMULATED_PAYMENTS=true apenas em ambientes de demonstração.');
-  return { paymentGateway, allowSimulatedPayments, fileScan, mailDelivery, smtp, adminEmails: (process.env.ADMIN_EMAILS ?? '').split(',').map(v => v.trim().toLowerCase()).filter(Boolean), clamavHost: process.env.CLAMAV_HOST, clamavPort: Number(process.env.CLAMAV_PORT ?? 3310), databaseUrl, encryptionKey, origin, production, port: Number(process.env.PORT ?? 3001), storageDir: resolve(process.env.STORAGE_DIR ?? '../../.local/assets'), fileStorage };
+  return { paymentGateway, allowSimulatedPayments, mercadoPago, fileScan, mailDelivery, smtp, adminEmails: (process.env.ADMIN_EMAILS ?? '').split(',').map(v => v.trim().toLowerCase()).filter(Boolean), clamavHost: process.env.CLAMAV_HOST, clamavPort: Number(process.env.CLAMAV_PORT ?? 3310), databaseUrl, encryptionKey, origin, production, port: Number(process.env.PORT ?? 3001), storageDir: resolve(process.env.STORAGE_DIR ?? '../../.local/assets'), fileStorage };
 }

@@ -194,3 +194,11 @@ summary { cursor: pointer; min-height: 44px; padding-block: 12px; }
 .file-list li span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-list li small { opacity: .7; white-space: nowrap; }
 .file-list li button { background: none; border: 0; padding: 0; color: inherit; text-decoration: underline; cursor: pointer; font: inherit; }
+
+/* Pix payment panel (checkout and buyer order page) */
+.pix-panel { margin-top: 20px; padding: 22px; border: 1px solid var(--line); border-radius: 14px; display: grid; gap: 14px; }
+.pix-panel h2 { font-size: 20px; }
+.pix-panel p { font-size: 14px; line-height: 1.6; }
+.pix-qr { justify-self: center; border: 1px solid var(--line); border-radius: 10px; padding: 8px; background: white; }
+.pix-panel textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; line-height: 1.5; word-break: break-all; }
+#cardPaymentBrick_container { margin-top: 10px; min-height: 120px; }

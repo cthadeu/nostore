@@ -10,7 +10,7 @@
     "db:generate": "prisma generate",
     "db:migrate": "node --env-file-if-exists=../../.env ../../node_modules/prisma/build/index.js migrate deploy",
     "typecheck": "tsc --noEmit",
-    "test": "node --env-file-if-exists=../../.env --test test/*.test.ts"
+    "test": "node --env-file-if-exists=../../.env --test --test-concurrency=1 test/*.test.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.2",

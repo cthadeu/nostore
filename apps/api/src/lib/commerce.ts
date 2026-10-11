@@ -12,12 +12,15 @@ export function downloadDeadline() { return forever(); }
 export const currentFee = (db: Pick<Prisma.TransactionClient, 'feePolicy'>) => db.feePolicy.findFirstOrThrow({ orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] });
 export const isAdmin = (config: Config, user: { email: string; emailVerifiedAt: Date | null }) => Boolean(user.emailVerifiedAt && config.adminEmails.includes(user.email));
 export const orderStatus = (order: { status: string; expiresAt: Date }) => order.status === 'pending' && order.expiresAt <= new Date() ? 'expired' : order.status;
-export const publicOrder = (order: Order & { payment: { method: string } | null }) => ({
+type PaymentView = { method: string; statusDetail?: string | null; pixQrCode?: string | null; pixQrCodeBase64?: string | null; pixTicketUrl?: string | null; pixExpiresAt?: Date | null };
+export const publicOrder = (order: Order & { payment: PaymentView | null }) => ({
   id: order.id, productName: order.productName, productType: order.productType,
   priceCents: order.priceCents, feeCents: order.feeCents, totalCents: order.totalCents,
   status: orderStatus(order), gateway: order.gateway, method: order.payment?.method ?? '',
   createdAt: order.createdAt.toISOString(), expiresAt: order.expiresAt.toISOString(),
   downloadable: order.status === 'paid' && order.productType === 'digital' && Boolean(order.downloadUntil && order.downloadUntil > new Date()),
+  statusDetail: order.payment?.statusDetail ?? null,
+  pix: orderStatus(order) === 'pending' && order.payment?.pixQrCode ? { qrCode: order.payment.pixQrCode, qrCodeBase64: order.payment.pixQrCodeBase64 ?? null, ticketUrl: order.payment.pixTicketUrl ?? null, expiresAt: order.payment.pixExpiresAt?.toISOString() ?? null } : null,
 });
 export async function queueMail(tx: Prisma.TransactionClient, config: Config, to: string, spec: MailSpec) {
   await tx.emailJob.create({ data: { payloadEncrypted: encrypt(JSON.stringify({ to, ...composeMail(spec, to) }), config.encryptionKey) } });

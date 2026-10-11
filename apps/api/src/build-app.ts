@@ -11,19 +11,22 @@ import type { Config } from './lib/config.ts';
 import { createDb } from './lib/db.ts';
 import { createStorage, type ObjectStorage } from './lib/storage.ts';
 import { createTransport, drainEmailJobs, takeMailQueued } from './lib/mailer.ts';
+import { MercadoPagoClient } from './lib/mercadopago.ts';
 import { AppError } from './lib/domain.ts';
 import { hashToken, matchesHash } from './lib/security.ts';
 import { authRoutes } from './modules/auth.ts';
 import { sellerRoutes } from './modules/seller.ts';
 import { commerceRoutes } from './modules/commerce.ts';
+import { gatewayRoutes } from './modules/gateway.ts';
+import { webhookRoutes } from './modules/webhooks.ts';
 import { assetRoutes } from './modules/assets.ts';
 
 type Identity = { userId: string; sellerId: string; sessionId: string; csrfHash: string };
 declare module 'fastify' {
-  interface FastifyInstance { db: PrismaClient; config: Config; storage: ObjectStorage; authenticate: (request: FastifyRequest) => Promise<void> }
+  interface FastifyInstance { db: PrismaClient; config: Config; storage: ObjectStorage; mp: MercadoPagoClient | null; authenticate: (request: FastifyRequest) => Promise<void> }
   interface FastifyRequest { identity: Identity | null }
 }
-export async function buildApp(config: Config, options: { logger?: boolean } = {}) {
+export async function buildApp(config: Config, options: { logger?: boolean; fetch?: typeof fetch; mercadoPagoApiBase?: string } = {}) {
   const app = Fastify({
     logger: options.logger === false ? false : { level: 'info', redact: ['req.headers.cookie', 'req.headers.authorization', 'req.headers["x-csrf-token"]', 'res.headers["set-cookie"]'], serializers: { req: (req) => ({ method: req.method, url: req.url?.split('?')[0], id: req.id }) } },
     bodyLimit: 1024 * 1024, requestTimeout: 30_000, trustProxy: false,
@@ -41,6 +44,7 @@ export async function buildApp(config: Config, options: { logger?: boolean } = {
     server.decorate('db', db);
     server.decorate('config', config);
     server.decorate('storage', createStorage(config));
+    server.decorate('mp', config.mercadoPago ? new MercadoPagoClient({ ...config.mercadoPago, apiBase: options.mercadoPagoApiBase }, options.fetch) : null);
     server.addHook('onClose', async () => { await db.$disconnect(); });
   }, { name: 'database' }));
   await app.register(fp(async (server) => {
@@ -72,7 +76,8 @@ export async function buildApp(config: Config, options: { logger?: boolean } = {
   app.addHook('onRequest', async (request, reply) => {
     reply.header('Cache-Control', 'no-store');
     const origin = request.headers.origin;
-    if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method) && origin !== config.origin) throw new AppError('ORIGIN_INVALID', 'Origem da requisição não permitida.', 403);
+    // Provider webhooks are server-to-server calls authenticated by signature, not by browser origin.
+    if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method) && origin !== config.origin && !request.url.startsWith('/api/v1/webhooks/')) throw new AppError('ORIGIN_INVALID', 'Origem da requisição não permitida.', 403);
   });
   app.setErrorHandler((error, request, reply) => {
     const err = error as { validation?: unknown; statusCode?: number; code?: string; message?: string };
@@ -90,6 +95,8 @@ export async function buildApp(config: Config, options: { logger?: boolean } = {
   await app.register(sellerRoutes, { prefix: '/api/v1/seller' });
   await app.register(assetRoutes, { prefix: '/api/v1/seller/assets' });
   await app.register(commerceRoutes, { prefix: '/api/v1' });
+  await app.register(gatewayRoutes, { prefix: '/api/v1/seller/gateway' });
+  await app.register(webhookRoutes, { prefix: '/api/v1/webhooks' });
   if (!config.production) app.get('/api/v1/openapi.json', async () => app.swagger());
   return app;
 }

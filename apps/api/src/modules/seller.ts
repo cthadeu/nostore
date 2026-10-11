@@ -16,7 +16,7 @@ export async function sellerRoutes(server: FastifyInstance) {
   app.addHook('onRequest', app.authenticate);
   app.get('/profile', async (request) => {
     const seller = await app.db.seller.findUniqueOrThrow({ where: { id: request.identity!.sellerId }, include: { user: true } });
-    return { id: seller.id, name: seller.user.name, email: seller.user.email, emailVerified: Boolean(seller.user.emailVerifiedAt), displayName: seller.displayName, personType: seller.personType, documentLast4: seller.documentLast4, plan: effectivePlan(seller), gatewayStatus: seller.gatewayStatus, paymentGateway: app.config.paymentGateway, isAdmin: isAdmin(app.config, seller.user) };
+    return { id: seller.id, name: seller.user.name, email: seller.user.email, emailVerified: Boolean(seller.user.emailVerifiedAt), displayName: seller.displayName, personType: seller.personType, documentLast4: seller.documentLast4, plan: effectivePlan(seller), gatewayStatus: seller.gatewayStatus, gatewayAccount: seller.mpUserId, paymentGateway: app.config.paymentGateway, isAdmin: isAdmin(app.config, seller.user) };
   });
   app.patch('/profile', { schema: { body: Type.Object({ displayName: Type.String({ minLength: 2, maxLength: 100 }), personType: Type.Union([Type.Literal('individual'), Type.Literal('business')]), document: Type.Optional(Type.String({ minLength: 11, maxLength: 14 })) }, { additionalProperties: false }), response: { 200: MessageResponse } } }, async (request) => {
     const { document, ...profile } = request.body;
@@ -89,6 +89,7 @@ export async function sellerRoutes(server: FastifyInstance) {
       const product = await tx.product.findFirst({ where: { id: request.params.id, sellerId }, include: withFiles });
       if (!product) throw new AppError('NOT_FOUND', 'Produto não encontrado.', 404);
       if (seller.moderationStatus !== 'active') throw new AppError('SELLER_SUSPENDED', 'Esta conta não pode publicar produtos.', 403);
+      if (app.config.paymentGateway === 'mercadopago' && seller.gatewayStatus !== 'connected') throw new AppError('GATEWAY_NOT_CONNECTED', 'Conecte sua conta Mercado Pago em Configurações → Recebimento antes de publicar.', 409);
       if (product.status === 'active') return;
       assertPublicationLimit(effectivePlan(seller), await tx.product.count({ where: { sellerId, status: 'active' } }));
       if (!seller.user.emailVerifiedAt) throw new AppError('EMAIL_UNVERIFIED', 'Confirme seu e-mail antes de publicar.', 409);
