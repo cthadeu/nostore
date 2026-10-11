@@ -43,7 +43,9 @@ test('monta URL de autorização e requisições de pagamento com split', async 
   assert.equal(body.date_of_expiration, '2026-10-12T00:00:00.000-03:00');
   await client.createPayment('seller-token', { amountCents: 1000, feeCents: 50, description: 'x', orderId: 'order-2', notificationUrl: 'n', expiresAt: new Date(), payer: { email: 'c@example.test', name: 'Solo', document: '12345678000195' }, method: 'card', card: { token: 'tok', paymentMethodId: 'master', issuerId: '24' } }, 'order-2');
   const cardBody = JSON.parse(String(calls[1]!.init.body));
-  assert.equal(cardBody.token, 'tok'); assert.equal(cardBody.installments, 1); assert.equal(cardBody.binary_mode, true); assert.equal(cardBody.issuer_id, 24); assert.equal(cardBody.payer.identification.type, 'CNPJ'); assert.equal(cardBody.payer.last_name, 'Solo');
+  assert.equal(cardBody.token, 'tok');
+  await client.createPayment('seller-token', { amountCents: 1000, feeCents: 0, description: 'x', orderId: 'order-3', notificationUrl: 'n', expiresAt: new Date(), payer: { email: 'c@example.test', name: 'Solo', document: '52998224725' }, method: 'pix' }, 'order-3');
+  assert.equal('application_fee' in JSON.parse(String(calls[2]!.init.body)), false, 'taxa zero não envia application_fee'); assert.equal(cardBody.installments, 1); assert.equal(cardBody.binary_mode, true); assert.equal(cardBody.issuer_id, 24); assert.equal(cardBody.payer.identification.type, 'CNPJ'); assert.equal(cardBody.payer.last_name, 'Solo');
 });
 
 test('erros HTTP do Mercado Pago viram exceções com status', async () => {

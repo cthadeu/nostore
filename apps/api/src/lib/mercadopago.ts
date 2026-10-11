@@ -57,7 +57,9 @@ export class MercadoPagoClient {
   createPayment(accessToken: string, input: MpPaymentInput, idempotencyKey: string) {
     const { first, last } = splitName(input.payer.name);
     const body: Record<string, unknown> = {
-      transaction_amount: cents(input.amountCents), application_fee: cents(input.feeCents), description: input.description.slice(0, 250),
+      transaction_amount: cents(input.amountCents), description: input.description.slice(0, 250),
+      // Mercado Pago rejects a zero application_fee: only send the marketplace share when there is one.
+      ...(input.feeCents > 0 ? { application_fee: cents(input.feeCents) } : {}),
       external_reference: input.orderId, notification_url: input.notificationUrl, statement_descriptor: 'NOSTORE', metadata: { order_id: input.orderId },
       payer: { email: input.payer.email, first_name: first, last_name: last, identification: { type: input.payer.document.length === 14 ? 'CNPJ' : 'CPF', number: input.payer.document } },
     };
