@@ -1,11 +1,11 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply } from 'fastify';
 import type { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 import { Type } from '@sinclair/typebox';
 import { randomUUID } from 'node:crypto';
 import { AppError, calculateFee, isValidDocument } from '../lib/domain.ts';
 import { decrypt, encrypt, hashToken, token } from '../lib/security.ts';
 import { gatewayFor } from '../lib/gateway.ts';
-import { authorizeOrder, currentFee, day, downloadDeadline, isAdmin, issueAccess, publicOrder, queueMail } from '../lib/commerce.ts';
+import { authorizeOrder, currentFee, day, downloadDeadline, isAdmin, issueAccess, paymentConfirmedMail, publicOrder, queueMail } from '../lib/commerce.ts';
 import { AccessBody, Address, CheckoutInput, FeeResponse, OrderResponse } from '../lib/commerce-schemas.ts';
 import { IdParams, MessageResponse } from '../lib/schemas.ts';
 
@@ -52,9 +52,11 @@ export async function commerceRoutes(server: FastifyInstance) {
         const updated = await tx.order.update({ where: { id }, data: { status, ...(paid ? { paidAt: new Date(), downloadUntil: downloadDeadline() } : {}) }, include: { payment: true } });
         await tx.paymentAttempt.update({ where: { orderId: id }, data: { status } });
         if (paid) {
-          await queueMail(tx, app.config, order.buyerEmail, '[Teste] Pagamento confirmado', `O pagamento simulado de ${order.productName} foi aprovado. Nenhum valor foi cobrado.`);
-          const link = await issueAccess(tx, id, app.config);
-          await queueMail(tx, app.config, order.buyerEmail, order.productType === 'digital' ? '[Teste] Seu produto está disponível' : '[Teste] Acompanhe seu pedido', `Pedido: ${order.id}\nAcesse seu pedido: ${link}\nO link vale por 24 horas. Você pode solicitar outro na página do pedido.${order.productType === 'digital' ? '\nDownload disponível por 12 meses após a aprovação, sujeito à situação do pagamento.' : ''}`);
+          // One e-mail with the confirmation and a permanent link; digital orders also get a direct download URL.
+          const raw = token();
+          const link = await issueAccess(tx, id, app.config, raw, true);
+          const mail = paymentConfirmedMail(order, link, order.productType === 'digital' ? `${app.config.origin}/api/v1/buyer/file?token=${raw}` : null);
+          await queueMail(tx, app.config, order.buyerEmail, mail.subject, mail.text);
         } else {
           await queueMail(tx, app.config, order.buyerEmail, status === 'refunded' ? '[Teste] Pagamento reembolsado' : '[Teste] Pagamento recusado', `Pedido: ${order.productName}. ${status === 'refunded' ? 'O reembolso foi simulado e o acesso ao download foi revogado.' : 'O pagamento foi recusado na simulação. Você pode iniciar uma nova compra.'} Nenhum valor foi movimentado.`);
         }
@@ -164,8 +166,9 @@ export async function commerceRoutes(server: FastifyInstance) {
     await app.db.$transaction(async tx => {
       const order = await tx.order.findFirst({ where: { id: request.body.orderId, buyerEmail: request.body.email.trim().toLowerCase() } });
       if (!order) return;
-      const link = await issueAccess(tx, order.id, app.config);
-      await queueMail(tx, app.config, order.buyerEmail, '[Teste] Novo acesso ao pedido', `Pedido: ${order.id}\nAcesse seu pedido: ${link}\nEste link vale por 24 horas.`);
+      const paid = order.status === 'paid';
+      const link = await issueAccess(tx, order.id, app.config, token(), paid);
+      await queueMail(tx, app.config, order.buyerEmail, `${order.gateway === 'simulated' ? '[Teste] ' : ''}Novo acesso ao pedido`, `Pedido: ${order.id}\nAcesse seu pedido: ${link}\n${paid ? 'Este link é permanente.' : 'Este link vale por 24 horas.'}`);
     });
     return { message: 'Se os dados corresponderem a uma compra, enviaremos um novo link por e-mail.' };
   });
@@ -191,8 +194,19 @@ export async function commerceRoutes(server: FastifyInstance) {
       if (!claimed.count) throw new AppError('DOWNLOAD_EXPIRED', 'Este link expirou ou já foi utilizado. Gere outro na página do pedido.', 403);
       return asset;
     });
+    return sendAsset(reply, asset);
+  });
+  // Permanent download link sent by e-mail: the access token identifies a paid digital order.
+  app.get('/buyer/file', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } }, schema: { querystring: Type.Object({ token: Type.String({ pattern: '^[a-f0-9]{64}$' }) }, { additionalProperties: false }) } }, async (request, reply) => {
+    const order = await authorizeOrder(app.db, request.query.token);
+    if (order.status !== 'paid' || !order.digitalAssetId || !order.downloadUntil || order.downloadUntil <= new Date()) throw new AppError('DOWNLOAD_FORBIDDEN', 'O download não está disponível para este pedido.', 403);
+    const asset = await app.db.asset.findFirst({ where: { id: order.digitalAssetId, sellerId: order.sellerId, kind: 'digital', status: 'approved' } });
+    if (!asset) throw new AppError('FILE_UNAVAILABLE', 'Arquivo indisponível. Entre em contato com o vendedor.', 409);
+    return sendAsset(reply, asset);
+  });
+  async function sendAsset(reply: FastifyReply, asset: { storageKey: string; originalName: string; size: number }) {
     const file = await app.storage.get(asset.storageKey);
     reply.header('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(asset.originalName).replace(/'/g, '%27')}`).header('Content-Length', asset.size).header('Referrer-Policy', 'no-referrer').type('application/octet-stream');
     return reply.send(file);
-  });
+  }
 }

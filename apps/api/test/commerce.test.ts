@@ -109,7 +109,13 @@ test('venda simulada: publicação, taxa, idempotência, isolamento, entrega e r
   const approvals = await Promise.all([post(`/seller/orders/${order.id}/simulate`, { outcome: 'paid' }, admin), post(`/seller/orders/${order.id}/simulate`, { outcome: 'paid' }, admin)]);
   for (const r of approvals) assert.equal(r.statusCode, 200, r.body);
   const mails = (await app.db.emailJob.findMany({ where: { status: 'pending' } })).map(j => JSON.parse(decrypt(j.payloadEncrypted, config.encryptionKey))).filter(m => m.to === buyerEmail);
-  assert.equal(mails.length, 3, 'pedido, pagamento e acesso: sem duplicatas na aprovação');
+  assert.equal(mails.length, 2, 'pedido e confirmação com link permanente: sem duplicatas na aprovação');
+  const confirmation = mails.find(m => m.text.includes('Baixar arquivo:'))!;
+  const permanentUrl = confirmation.text.match(/Baixar arquivo: (\S+)/)![1]!;
+  const direct = await app.inject({ method: 'GET', url: permanentUrl.replace(config.origin, '') });
+  assert.equal(direct.statusCode, 200, direct.body); assert.ok(direct.body.includes('primeira versão'));
+  const permanentGrant = await app.db.accessGrant.findUniqueOrThrow({ where: { tokenHash: hashToken(new URL(permanentUrl).searchParams.get('token')!) } });
+  assert.ok(permanentGrant.expiresAt.getUTCFullYear() >= 9999, 'link do e-mail não expira');
   assert.equal((await post('/buyer/order', { token: checkoutToken })).json().downloadable, true);
   const exchange = await post('/buyer/session', { token: checkoutToken });
   assert.equal(exchange.statusCode, 200);

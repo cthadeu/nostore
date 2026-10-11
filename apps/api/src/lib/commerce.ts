@@ -5,7 +5,9 @@ import { AppError } from './domain.ts';
 import { markMailQueued } from './mailer.ts';
 
 export const day = 86_400_000;
-export function downloadDeadline() { const date = new Date(); date.setUTCFullYear(date.getUTCFullYear() + 1); return date; }
+// Downloads do not expire on their own; a refund revokes them by changing the order status.
+export const forever = () => new Date('9999-12-31T00:00:00Z');
+export function downloadDeadline() { return forever(); }
 export const currentFee = (db: Pick<Prisma.TransactionClient, 'feePolicy'>) => db.feePolicy.findFirstOrThrow({ orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] });
 export const isAdmin = (config: Config, user: { email: string; emailVerifiedAt: Date | null }) => Boolean(user.emailVerifiedAt && config.adminEmails.includes(user.email));
 export const orderStatus = (order: { status: string; expiresAt: Date }) => order.status === 'pending' && order.expiresAt <= new Date() ? 'expired' : order.status;
@@ -20,9 +22,19 @@ export async function queueMail(tx: Prisma.TransactionClient, config: Config, to
   await tx.emailJob.create({ data: { payloadEncrypted: encrypt(JSON.stringify({ to, subject, text }), config.encryptionKey) } });
   markMailQueued();
 }
-export async function issueAccess(tx: Prisma.TransactionClient, orderId: string, config: Config, raw = token()) {
-  await tx.accessGrant.create({ data: { orderId, tokenHash: hashToken(raw), expiresAt: new Date(Date.now() + day) } });
+// Pending orders get a 24h link; paid orders get a permanent one, sent by e-mail, that always reopens the order page.
+export async function issueAccess(tx: Prisma.TransactionClient, orderId: string, config: Config, raw = token(), permanent = false) {
+  await tx.accessGrant.create({ data: { orderId, tokenHash: hashToken(raw), expiresAt: permanent ? forever() : new Date(Date.now() + day) } });
   return `${config.origin}/pedido#token=${raw}`;
+}
+export function paymentConfirmedMail(order: { id: string; productName: string; productType: string; gateway: string }, link: string, downloadUrl: string | null) {
+  const tag = order.gateway === 'simulated' ? '[Teste] ' : '';
+  const lines = [`Pagamento confirmado: ${order.productName}.`];
+  if (order.gateway === 'simulated') lines.push('Pagamento simulado: nenhum valor foi cobrado.');
+  lines.push(`Pedido: ${order.id}`);
+  if (order.productType === 'digital') lines.push('', 'Seu arquivo está disponível para download. Guarde este e-mail: o link é permanente e pode ser usado sempre que precisar.', `Baixar arquivo: ${downloadUrl}`, `Página do pedido: ${link}`);
+  else lines.push('', 'O vendedor foi avisado e vai preparar o envio.', `Acompanhe seu pedido: ${link}`);
+  return { subject: `${tag}${order.productType === 'digital' ? 'Seu arquivo está disponível' : 'Pagamento confirmado'}`, text: lines.join('\n') };
 }
 export async function authorizeOrder(tx: Prisma.TransactionClient, raw: string) {
   const grant = await tx.accessGrant.findUnique({ where: { tokenHash: hashToken(raw) } });
