@@ -1,0 +1,49 @@
+import { useState } from 'react';
+import type { FormEvent } from 'react';
+import { Link, Navigate, useNavigate, useParams, useLocation } from 'react-router';
+import useSWR, { useSWRConfig } from 'swr';
+import { Button } from '@heroui/react/button';
+import { api, ApiError } from '../lib/api';
+import type { Product, Profile } from '../lib/api';
+import { Brand, Field, Notice, Pending, Submit } from '../components/ui';
+
+export default function ProductEditor() {
+  const { id } = useParams();
+  const { data: profile, error } = useSWR<Profile>('/seller/profile');
+  const { data: product, error: productError } = useSWR<Product>(id && profile ? `/seller/products/${id}` : null);
+  if (error instanceof ApiError && error.status === 401) return <Navigate to="/entrar" replace/>;
+  if (error || productError) return <main className="narrow"><Link to="/">← Voltar</Link><Notice error message={(error ?? productError).message}/></main>;
+  if (!profile || (id && !product)) return <Pending/>;
+  return <Editor key={id ?? 'new'} product={product}/>;
+}
+function Editor({ product }: { product?: Product }) {
+  const navigate = useNavigate();
+  const { mutate } = useSWRConfig();
+  const location = useLocation();
+  const [type, setType] = useState(product?.type ?? 'digital');
+  const [error, setError] = useState('');
+  const [pending, setPending] = useState(false);
+  const [message, setMessage] = useState(location.state?.saved ? 'Produto salvo como rascunho.' : '');
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); if (pending) return;
+    const form = new FormData(event.currentTarget);
+    setPending(true); setError('');
+    try {
+      async function upload(name: string, kind: string, existing: string | null) {
+        const file = form.get(name);
+        if (!(file instanceof File) || file.size === 0) return existing;
+        const data = new FormData(); data.append('file', file);
+        return (await api<{ id: string }>(`/seller/assets/${kind}`, { method: 'POST', body: data })).id;
+      }
+      const [imageAssetId, digitalAssetId] = await Promise.all([upload('image', 'image', product?.imageAssetId ?? null), type === 'digital' ? upload('file', 'digital', product?.digitalAssetId ?? null) : Promise.resolve(null)]);
+      const result = await api<Product>(product ? `/seller/products/${product.id}` : '/seller/products', { method: product ? 'PATCH' : 'POST', body: JSON.stringify({ name: form.get('name'), description: form.get('description'), priceCents: Math.round(Number(String(form.get('price')).replace(',', '.')) * 100), type, paymentMethods: form.getAll('methods'), imageAssetId, digitalAssetId, shippingDays: type === 'physical' ? Number(form.get('shippingDays')) : null }) });
+      await mutate(`/seller/products/${result.id}`, result, { revalidate: false });
+      navigate(`/produtos/${result.id}`, { replace: true, state: { saved: true } }); setMessage('Produto salvo como rascunho.');
+    } catch (err) { setError((err as Error).message); } finally { setPending(false); }
+  }
+  return <div><header className="editor-header"><Link to="/"><Brand/></Link><Link to="/">← Meus produtos</Link></header><main className="editor-layout"><section><span className="eyebrow">DO SEU JEITO</span><h1>{product ? 'Cuide da sua ideia.' : 'O que você vai criar?'}</h1><p className="quiet">Dê um nome, conte a história e prepare seu produto.</p><form className="editor-form" onSubmit={submit}><fieldset disabled={pending || product?.status === 'active'}><div className="type-selector"><button type="button" className={type === 'digital' ? 'selected' : ''} onClick={() => setType('digital')}><strong>↗ Digital</strong><small>E-books, guias e arquivos</small></button><button type="button" className={type === 'physical' ? 'selected' : ''} onClick={() => setType('physical')}><strong>□ Físico</strong><small>Criações para enviar</small></button></div><Field label="Nome do produto"><input name="name" defaultValue={product?.name} required minLength={2} maxLength={120} placeholder="Ex.: Guia de fotografia com o celular"/></Field><Field label="Descrição"><textarea name="description" defaultValue={product?.description} rows={5} required minLength={10} maxLength={5000} placeholder="Conte o que torna seu produto especial e o que a pessoa vai receber."/></Field><Field label="Preço (R$)"><input name="price" defaultValue={product ? (product.priceCents / 100).toFixed(2) : ''} type="number" step="0.01" min="0.01" max="1000000" required placeholder="49,90"/></Field><Field label="Imagem do produto" hint={product?.imageAssetId ? 'Uma imagem já está salva. Envie outra para substituir.' : 'JPG, PNG ou WebP. Até 8 MB.'}><input name="image" type="file" accept="image/jpeg,image/png,image/webp"/></Field>{type === 'digital' ? <Field label="Arquivo digital" hint={product?.digitalAssetId ? 'Um arquivo já está salvo. Envie outro para substituir.' : 'PDF, EPUB ou ZIP. Até 100 MB. O arquivo fica privado e passa por verificação de segurança.'}><input name="file" type="file" accept=".pdf,.epub,.zip"/></Field> : <Field label="Prazo de postagem (dias úteis)" hint="O custo e a organização do envio são de sua responsabilidade."><input name="shippingDays" type="number" min="1" max="90" defaultValue="3" required/></Field>}<fieldset><legend>Como você quer receber?</legend><div className="payment-options"><label className="check-row"><input type="checkbox" name="methods" value="pix" defaultChecked={!product || product.paymentMethods.includes('pix')}/> Pix</label><label className="check-row"><input type="checkbox" name="methods" value="card" defaultChecked={!product || product.paymentMethods.includes('card')}/> Cartão de crédito</label></div></fieldset>{error ? <Notice error message={error}/> : null}{message ? <Notice message={message}/> : null}<div className="editor-actions"><Link to="/">Voltar</Link><Submit pending={pending}>Salvar produto →</Submit></div></fieldset></form></section><aside className="editor-aside"><span className="eyebrow">UM PASSO DE CADA VEZ</span><h2>Uma boa ideia<br/>merece uma boa<br/>apresentação.</h2><p>Use uma imagem nítida, uma descrição clara e um nome fácil de lembrar.</p><hr/><h3>{product?.status === 'active' ? 'Seu checkout está disponível.' : 'Prepare seu checkout.'}</h3><p>Confirme seu e-mail, adicione uma imagem e, para produtos digitais, um arquivo verificado. As compras usam pagamento simulado.</p>{product ? <><Button variant="outline" isDisabled={pending} onPress={async () => {
+    setPending(true); setError('');
+    try { const result = await api<{ message: string }>(`/seller/products/${product.id}/${product.status === 'active' ? 'pause' : 'publish'}`, { method: 'POST' }); await mutate(`/seller/products/${product.id}`); setMessage(result.message); }
+    catch (err) { setError((err as Error).message); } finally { setPending(false); }
+  }}>{product.status === 'active' ? 'Pausar para editar' : 'Publicar produto'}</Button>{product.status === 'active' ? <div className="checkout-links"><Field label="Link do checkout"><input readOnly value={`${window.location.origin}/checkout/${product.publicId}`}/></Field><Button variant="outline" onPress={async () => { try { await navigator.clipboard.writeText(`${window.location.origin}/checkout/${product.publicId}`); setMessage('Link copiado.'); } catch { setError('Selecione e copie o link do campo acima.'); } }}>Copiar link</Button><a className="button button--outline" href={`/checkout/${product.publicId}`} target="_blank" rel="noreferrer">Abrir checkout</a></div> : null}<Link className="button button--outline" to={`/pedidos?productId=${product.id}`}>Ver pedidos do produto</Link></> : null}</aside></main></div>;
+}

@@ -1,0 +1,179 @@
+generator client {
+  provider = "prisma-client"
+  output = "../src/generated/prisma"
+  importFileExtension = "ts"
+}
+datasource db {
+  provider = "postgresql"
+}
+model User {
+  id String @id @default(uuid()) @db.Uuid
+  email String @unique
+  name String
+  passwordHash String
+  emailVerifiedAt DateTime?
+  termsAcceptedAt DateTime @default(now())
+  createdAt DateTime @default(now())
+  seller Seller?
+  sessions Session[]
+  tokens AuthToken[]
+}
+model Seller {
+  id String @id @default(uuid()) @db.Uuid
+  userId String @unique @db.Uuid
+  user User @relation(fields: [userId], references: [id])
+  displayName String
+  personType String @default("individual")
+  documentEncrypted String?
+  documentLast4 String?
+  plan String @default("free")
+  proUntil DateTime?
+  moderationStatus String @default("active")
+  gatewayStatus String @default("not_connected")
+  createdAt DateTime @default(now())
+  orders Order[]
+  products Product[]
+  assets Asset[]
+}
+model Session {
+  id String @id @default(uuid()) @db.Uuid
+  tokenHash String @unique
+  csrfHash String
+  userId String @db.Uuid
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  @@index([expiresAt])
+}
+model AuthToken {
+  id String @id @default(uuid()) @db.Uuid
+  tokenHash String @unique
+  kind String
+  userId String @db.Uuid
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  usedAt DateTime?
+  @@index([userId, kind])
+}
+model Product {
+  id String @id @default(uuid()) @db.Uuid
+  publicId String @unique @default(uuid()) @db.Uuid
+  sellerId String @db.Uuid
+  seller Seller @relation(fields: [sellerId], references: [id])
+  name String
+  description String
+  priceCents Int
+  type String
+  status String @default("draft")
+  paymentMethods String[]
+  imageAssetId String? @db.Uuid
+  digitalAssetId String? @db.Uuid
+  shippingDays Int?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([sellerId, createdAt])
+  orders Order[]
+  @@index([sellerId, status])
+}
+model Asset {
+  id String @id @default(uuid()) @db.Uuid
+  sellerId String @db.Uuid
+  seller Seller @relation(fields: [sellerId], references: [id])
+  purchasedBy Order[]
+  kind String
+  originalName String
+  storageKey String @unique
+  mimeType String
+  size Int
+  status String
+  createdAt DateTime @default(now())
+  @@index([sellerId, createdAt])
+}
+model FeePolicy {
+  id String @id @default(uuid()) @db.Uuid
+  basisPoints Int
+  createdBy String? @db.Uuid
+  orders Order[]
+  createdAt DateTime @default(now())
+}
+model EmailJob {
+  id String @id @default(uuid()) @db.Uuid
+  payloadEncrypted String
+  status String @default("pending")
+  attempts Int @default(0)
+  availableAt DateTime @default(now())
+  leaseUntil DateTime?
+  sentAt DateTime?
+  createdAt DateTime @default(now())
+  @@index([status, availableAt])
+}
+
+model Order {
+  id String @id @default(uuid()) @db.Uuid
+  sellerId String @db.Uuid
+  seller Seller @relation(fields: [sellerId], references: [id])
+  productId String @db.Uuid
+  product Product @relation(fields: [productId], references: [id])
+  productName String
+  productType String
+  digitalAssetId String? @db.Uuid
+  digitalAsset Asset? @relation(fields: [digitalAssetId], references: [id], onDelete: Restrict)
+  buyerName String
+  buyerEmail String
+  buyerDocumentEncrypted String
+  addressEncrypted String?
+  priceCents Int
+  feeCents Int
+  totalCents Int
+  feeBasisPoints Int
+  feePolicyId String @db.Uuid
+  feePolicy FeePolicy @relation(fields: [feePolicyId], references: [id])
+  status String @default("pending")
+  gateway String
+  checkoutKeyHash String @unique
+  requestHash String
+  expiresAt DateTime
+  paidAt DateTime?
+  downloadUntil DateTime?
+  createdAt DateTime @default(now())
+  payment PaymentAttempt?
+  buyerSessions BuyerSession[]
+  accessGrants AccessGrant[]
+  downloadTickets DownloadTicket[]
+  @@index([sellerId, createdAt])
+  @@index([sellerId, status])
+}
+model PaymentAttempt {
+  id String @id @default(uuid()) @db.Uuid
+  orderId String @unique @db.Uuid
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  gateway String
+  reference String @unique
+  method String
+  status String @default("pending")
+  updatedAt DateTime @updatedAt
+}
+model AccessGrant {
+  id String @id @default(uuid()) @db.Uuid
+  orderId String @db.Uuid
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  tokenHash String @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
+model DownloadTicket {
+  id String @id @default(uuid()) @db.Uuid
+  orderId String @db.Uuid
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  tokenHash String @unique
+  expiresAt DateTime
+  usedAt DateTime?
+}
+model BuyerSession {
+  id String @id @default(uuid()) @db.Uuid
+  orderId String @db.Uuid
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  tokenHash String @unique
+  expiresAt DateTime
+  @@index([expiresAt])
+}

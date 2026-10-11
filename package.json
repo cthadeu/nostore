@@ -1,0 +1,19 @@
+{
+  "name": "nostore",
+  "private": true,
+  "type": "module",
+  "workspaces": ["apps/*"],
+  "engines": { "node": ">=24.0.0 <26" },
+  "scripts": {
+    "setup": "node scripts/setup.mjs",
+    "dev": "concurrently -k -n api,web,worker \"npm run dev -w @nostore/api\" \"npm run dev -w @nostore/web\" \"npm run worker -w @nostore/api\"",
+    "db:generate": "npm run db:generate -w @nostore/api",
+    "db:migrate": "npm run db:migrate -w @nostore/api",
+    "typecheck": "npm run typecheck --workspaces",
+    "build": "npm run typecheck && npm run build -w @nostore/web",
+    "test": "npm run test -w @nostore/api",
+    "test:e2e": "playwright test",
+    "check": "npm run typecheck && npm test && npm run build -w @nostore/web"
+  },
+  "devDependencies": { "concurrently": "^9.2.1", "@playwright/test": "^1.55.0", "typescript": "~5.9.3", "@types/node": "^24.0.0" }
+}

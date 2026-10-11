@@ -1,0 +1,6 @@
+{
+  "name": "@nostore/web", "private": true, "type": "module",
+  "scripts": { "dev": "vite --host 127.0.0.1", "typecheck": "tsc --noEmit", "build": "vite build", "preview": "vite preview --host 127.0.0.1" },
+  "dependencies": { "react": "^19.2.0", "react-dom": "^19.2.0", "react-router": "^7.9.0", "swr": "^2.3.6", "@heroui/react": "3.2.4", "@heroui/styles": "3.2.4", "tailwind-variants": "^3.1.1", "tailwindcss": "^4.1.13" },
+  "devDependencies": { "vite": "^7.1.7", "@vitejs/plugin-react": "^5.0.4", "@tailwindcss/vite": "^4.1.13", "@types/react": "^19.2.0", "@types/react-dom": "^19.2.0" }
+}
