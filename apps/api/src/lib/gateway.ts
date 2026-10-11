@@ -18,6 +18,6 @@ const simulatedGateway: PaymentGateway = {
   },
 };
 export function gatewayFor(config: Config): PaymentGateway {
-  if (config.paymentGateway !== 'simulated' || config.production) throw new AppError('GATEWAY_UNAVAILABLE', 'O checkout está indisponível neste ambiente.', 409);
+  if (config.paymentGateway !== 'simulated' || (config.production && !config.allowSimulatedPayments)) throw new AppError('GATEWAY_UNAVAILABLE', 'O checkout está indisponível neste ambiente.', 409);
   return simulatedGateway;
 }

@@ -29,6 +29,7 @@ export async function buildApp(config: Config, options: { logger?: boolean } = {
     ajv: { customOptions: { removeAdditional: false } },
   });
   if (config.fileScan === 'off') app.log.warn('Varredura de arquivos desativada (FILE_SCAN=off): uploads são aceitos sem verificação antivírus.');
+  if (config.production && config.paymentGateway === 'simulated') app.log.warn('Gateway de pagamento simulado ativo em produção (ALLOW_SIMULATED_PAYMENTS=true): nenhum valor é cobrado.');
   await app.register(helmet, { global: true });
   await app.register(cookie);
   await app.register(rateLimit, { max: 120, timeWindow: '1 minute' });

@@ -36,7 +36,8 @@ test('venda simulada: publicação, taxa, idempotência, isolamento, entrega e r
   const adminEmail = `${randomUUID()}@example.test`;
   const buyerEmail = `${randomUUID()}@example.test`;
   const config = { ...getConfig(), databaseUrl: databaseUrl!, storageDir, fileStorage: 'local' as const, paymentGateway: 'simulated' as const, adminEmails: [adminEmail], clamavHost: '127.0.0.1', clamavPort: address.port };
-  assert.throws(() => gatewayFor({ ...config, production: true }), { code: 'GATEWAY_UNAVAILABLE' });
+  assert.throws(() => gatewayFor({ ...config, production: true, allowSimulatedPayments: false }), { code: 'GATEWAY_UNAVAILABLE' });
+  assert.equal(gatewayFor({ ...config, production: true, allowSimulatedPayments: true }).name, 'simulated');
   const app = await buildApp(config, { logger: false }); await app.ready();
   const userIds: string[] = [];
   t.after(async () => {

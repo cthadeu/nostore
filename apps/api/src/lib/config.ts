@@ -3,7 +3,7 @@ export interface Config {
   databaseUrl: string; origin: string; production: boolean; port: number;
   encryptionKey: string; storageDir: string;
   fileStorage: 'local' | 'blob';
-  paymentGateway: 'disabled' | 'simulated'; adminEmails: string[];
+  paymentGateway: 'disabled' | 'simulated'; allowSimulatedPayments: boolean; adminEmails: string[];
   clamavHost?: string; clamavPort: number; fileScan: 'clamav' | 'off';
 }
 export function getConfig(): Config {
@@ -20,6 +20,7 @@ export function getConfig(): Config {
   if (fileScan !== 'clamav' && fileScan !== 'off') throw new Error('FILE_SCAN deve ser clamav ou off.');
   const paymentGateway = process.env.PAYMENT_GATEWAY ?? 'disabled';
   if (paymentGateway !== 'disabled' && paymentGateway !== 'simulated') throw new Error('PAYMENT_GATEWAY inválido.');
-  if (production && paymentGateway === 'simulated') throw new Error('Gateway simulado não é permitido em produção.');
-  return { paymentGateway, fileScan, adminEmails: (process.env.ADMIN_EMAILS ?? '').split(',').map(v => v.trim().toLowerCase()).filter(Boolean), clamavHost: process.env.CLAMAV_HOST, clamavPort: Number(process.env.CLAMAV_PORT ?? 3310), databaseUrl, encryptionKey, origin, production, port: Number(process.env.PORT ?? 3001), storageDir: resolve(process.env.STORAGE_DIR ?? '../../.local/assets'), fileStorage };
+  const allowSimulatedPayments = process.env.ALLOW_SIMULATED_PAYMENTS === 'true';
+  if (production && paymentGateway === 'simulated' && !allowSimulatedPayments) throw new Error('Gateway simulado não é permitido em produção. Defina ALLOW_SIMULATED_PAYMENTS=true apenas em ambientes de demonstração.');
+  return { paymentGateway, allowSimulatedPayments, fileScan, adminEmails: (process.env.ADMIN_EMAILS ?? '').split(',').map(v => v.trim().toLowerCase()).filter(Boolean), clamavHost: process.env.CLAMAV_HOST, clamavPort: Number(process.env.CLAMAV_PORT ?? 3310), databaseUrl, encryptionKey, origin, production, port: Number(process.env.PORT ?? 3001), storageDir: resolve(process.env.STORAGE_DIR ?? '../../.local/assets'), fileStorage };
 }

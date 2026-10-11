@@ -79,7 +79,7 @@ Pendentes: assinatura Pro, envio físico com rastreio/comprovante, suporte/moder
 
 ## Fluxo de venda com pagamento simulado
 
-O Compose usa `PAYMENT_GATEWAY=simulated` por padrão. Nenhum dinheiro é movimentado. Em execução fora do Compose, configure essa variável no `.env`. O modo simulado é recusado quando `NODE_ENV=production`.
+O Compose usa `PAYMENT_GATEWAY=simulated` por padrão. Nenhum dinheiro é movimentado. Em execução fora do Compose, configure essa variável no `.env`. O modo simulado é recusado quando `NODE_ENV=production`, salvo em ambientes de demonstração com `ALLOW_SIMULATED_PAYMENTS=true`, que registram aviso no boot e nunca movimentam dinheiro.
 
 1. Execute `./scripts/docker-up.sh` e aguarde o ClamAV iniciar e carregar suas assinaturas (a primeira execução pode demorar alguns minutos e exige acesso à internet).
 2. Cadastre uma conta e confirme o e-mail pelo Mailpit em http://localhost:8025.
