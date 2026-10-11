@@ -6,7 +6,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import sharp from 'sharp';
-import { buildApp } from '../src/app.ts';
+import { buildApp } from '../src/build-app.ts';
 import { getConfig } from '../src/lib/config.ts';
 import { token, hashToken, decrypt } from '../src/lib/security.ts';
 import { gatewayFor } from '../src/lib/gateway.ts';

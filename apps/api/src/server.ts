@@ -1,4 +1,4 @@
-import { buildApp } from './app.ts';
+import { buildApp } from './build-app.ts';
 import { getConfig } from './lib/config.ts';
 const config = getConfig();
 const app = await buildApp(config);

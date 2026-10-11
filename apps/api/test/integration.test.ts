@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { buildApp } from '../src/app.ts';
+import { buildApp } from '../src/build-app.ts';
 import { getConfig } from '../src/lib/config.ts';
 import { decrypt } from '../src/lib/security.ts';
 const databaseUrl = process.env.TEST_DATABASE_URL;

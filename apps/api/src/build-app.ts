@@ -63,7 +63,7 @@ export async function buildApp(config: Config, options: { logger?: boolean } = {
     let code = error instanceof AppError ? error.code : err.validation ? 'VALIDATION_ERROR' : 'REQUEST_ERROR';
     let message = error instanceof AppError ? error.message : err.validation ? 'Confira os campos informados.' : status < 500 ? 'Não foi possível processar a solicitação.' : 'Não foi possível concluir agora. Tente novamente.';
     if (err.code === 'P2002') { status = 409; code = 'CONFLICT'; message = 'Não foi possível concluir com os dados informados.'; }
-    if (status === 500) request.log.error({ code: err.code ?? 'INTERNAL_ERROR' }, 'Request failed');
+    if (status === 500) request.log.error({ err: error, code: err.code ?? 'INTERNAL_ERROR' }, 'Request failed');
     reply.code(status).send({ code, message, requestId: request.id });
   });
   app.setNotFoundHandler((request, reply) => reply.code(404).send({ code: 'NOT_FOUND', message: 'Página não encontrada.', requestId: request.id }));
