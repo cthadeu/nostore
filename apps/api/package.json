@@ -8,15 +8,31 @@
     "worker": "node --env-file-if-exists=../../.env src/worker.ts",
     "build": "prisma generate",
     "db:generate": "prisma generate",
-    "storage:setup": "node --env-file-if-exists=../../.env scripts/storage-setup.ts",
     "db:migrate": "node --env-file-if-exists=../../.env ../../node_modules/prisma/build/index.js migrate deploy",
     "typecheck": "tsc --noEmit",
     "test": "node --env-file-if-exists=../../.env --test test/*.test.ts"
   },
   "dependencies": {
-    "fastify": "^5.6.0", "fastify-plugin": "^5.1.0",
-    "@fastify/cookie": "^11.0.2", "@fastify/helmet": "^13.0.2", "@fastify/rate-limit": "^10.3.0", "@fastify/swagger": "^9.5.1", "@fastify/type-provider-typebox": "^5.2.0", "@fastify/multipart": "^9.2.1",
-    "@sinclair/typebox": "^0.34.41", "@prisma/client": "^7.0.0", "@prisma/adapter-pg": "^7.0.0", "pg": "^8.16.3", "argon2": "^0.44.0", "nodemailer": "^7.0.10", "sharp": "^0.34.4"
+    "@fastify/cookie": "^11.0.2",
+    "@fastify/helmet": "^13.0.2",
+    "@fastify/multipart": "^9.2.1",
+    "@fastify/rate-limit": "^10.3.0",
+    "@fastify/swagger": "^9.5.1",
+    "@fastify/type-provider-typebox": "^5.2.0",
+    "@prisma/adapter-pg": "^7.0.0",
+    "@prisma/client": "^7.0.0",
+    "@sinclair/typebox": "^0.34.41",
+    "@vercel/blob": "^2.8.1",
+    "argon2": "^0.44.0",
+    "fastify": "^5.6.0",
+    "fastify-plugin": "^5.1.0",
+    "nodemailer": "^7.0.10",
+    "pg": "^8.16.3",
+    "sharp": "^0.34.4"
   },
-  "devDependencies": { "prisma": "^7.0.0", "@types/pg": "^8.15.6", "@types/nodemailer": "^7.0.3" }
+  "devDependencies": {
+    "@types/nodemailer": "^7.0.3",
+    "@types/pg": "^8.15.6",
+    "prisma": "^7.0.0"
+  }
 }

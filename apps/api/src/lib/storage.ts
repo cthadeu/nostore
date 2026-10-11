@@ -1,11 +1,11 @@
-import { createReadStream } from 'node:fs';
 import { mkdir, open, unlink, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { Readable } from 'node:stream';
+import { put, get, del } from '@vercel/blob';
 import type { Config } from './config.ts';
 import { AppError } from './domain.ts';
 
-// Object storage for seller assets. Supabase Storage in production (Vercel has no writable disk);
+// Object storage for seller assets. Vercel Blob in production (functions have no writable disk);
 // the local directory backend keeps development, Compose and tests self-contained.
 export interface ObjectStorage {
   put(key: string, data: Buffer, contentType: string): Promise<void>;
@@ -17,9 +17,7 @@ const unavailable = () => new AppError('FILE_UNAVAILABLE', 'Arquivo temporariame
 const validKey = (key: string) => { if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,200}$/.test(key)) throw new Error('Invalid storage key'); };
 
 export function createStorage(config: Config): ObjectStorage {
-  return config.supabaseUrl && config.supabaseServiceKey
-    ? supabaseStorage(config.supabaseUrl, config.supabaseServiceKey, config.storageBucket)
-    : localStorage(config.storageDir);
+  return config.fileStorage === 'blob' ? blobStorage() : localStorage(config.storageDir);
 }
 
 function localStorage(dir: string): ObjectStorage {
@@ -34,23 +32,19 @@ function localStorage(dir: string): ObjectStorage {
   };
 }
 
-function supabaseStorage(baseUrl: string, serviceKey: string, bucket: string): ObjectStorage {
-  const headers = { apikey: serviceKey, authorization: `Bearer ${serviceKey}` };
-  const objectUrl = (key: string) => { validKey(key); return `${baseUrl.replace(/\/$/, '')}/storage/v1/object/${encodeURIComponent(bucket)}/${key}`; };
-  const fail = async (response: Response, action: string) => { throw new Error(`Supabase Storage ${action} failed: ${response.status} ${(await response.text()).slice(0, 200)}`); };
+// Authenticates through Vercel OIDC (BLOB_STORE_ID + VERCEL_OIDC_TOKEN, injected by the platform)
+// or BLOB_READ_WRITE_TOKEN. Blobs are private: every read goes through the API's authorization.
+function blobStorage(): ObjectStorage {
+  const pathname = (key: string) => { validKey(key); return `assets/${key}`; };
   return {
     async put(key, data, contentType) {
-      const response = await fetch(objectUrl(key), { method: 'POST', headers: { ...headers, 'content-type': contentType, 'x-upsert': 'false' }, body: new Uint8Array(data) });
-      if (!response.ok) await fail(response, 'upload');
+      await put(pathname(key), data, { access: 'private', contentType, addRandomSuffix: false, allowOverwrite: false });
     },
     async get(key) {
-      const response = await fetch(objectUrl(key), { headers });
-      if (!response.ok || !response.body) throw unavailable();
-      return Readable.fromWeb(response.body as import('node:stream/web').ReadableStream);
+      const result = await get(pathname(key), { access: 'private', useCache: false });
+      if (!result || result.statusCode !== 200 || !result.stream) throw unavailable();
+      return Readable.fromWeb(result.stream as import('node:stream/web').ReadableStream);
     },
-    async delete(key) {
-      const response = await fetch(objectUrl(key), { method: 'DELETE', headers });
-      if (!response.ok && response.status !== 404) await fail(response, 'delete');
-    },
+    async delete(key) { await del(pathname(key)); },
   };
 }
