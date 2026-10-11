@@ -5,7 +5,6 @@ import { AppError, effectivePlan, assertPublicationLimit, isValidDocument } from
 import { gatewayFor } from '../lib/gateway.ts';
 import { isAdmin } from '../lib/commerce.ts';
 import { scanFile } from '../lib/scanner.ts';
-import { resolve } from 'node:path';
 import { encrypt } from '../lib/security.ts';
 import { IdParams, ProductInput, ProductResponse, MessageResponse } from '../lib/schemas.ts';
 
@@ -73,7 +72,7 @@ export async function sellerRoutes(server: FastifyInstance) {
     if (candidate?.digitalAssetId) {
       const asset = await app.db.asset.findFirst({ where: { id: candidate.digitalAssetId, sellerId: request.identity!.sellerId, kind: 'digital' } });
       if (asset && asset.status === 'quarantined') {
-        await scanFile(resolve(app.config.storageDir, asset.storageKey), app.config);
+        await scanFile(await app.storage.get(asset.storageKey), app.config);
         await app.db.asset.update({ where: { id: asset.id }, data: { status: 'approved' } });
       }
     }

@@ -8,6 +8,7 @@
     "worker": "node --env-file-if-exists=../../.env src/worker.ts",
     "build": "prisma generate",
     "db:generate": "prisma generate",
+    "storage:setup": "node --env-file-if-exists=../../.env scripts/storage-setup.ts",
     "db:migrate": "node --env-file-if-exists=../../.env ../../node_modules/prisma/build/index.js migrate deploy",
     "typecheck": "tsc --noEmit",
     "test": "node --env-file-if-exists=../../.env --test test/*.test.ts"

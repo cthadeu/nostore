@@ -11,7 +11,6 @@ import { getConfig } from '../src/lib/config.ts';
 import { token, hashToken, decrypt } from '../src/lib/security.ts';
 import { gatewayFor } from '../src/lib/gateway.ts';
 import { scanFile } from '../src/lib/scanner.ts';
-import { writeFile } from 'node:fs/promises';
 const databaseUrl = process.env.TEST_DATABASE_URL;
 
 test('venda simulada: publicação, taxa, idempotência, isolamento, entrega e revogação', { skip: !databaseUrl }, async t => {
@@ -36,7 +35,7 @@ test('venda simulada: publicação, taxa, idempotência, isolamento, entrega e r
   const address = scanner.address() as { port: number };
   const adminEmail = `${randomUUID()}@example.test`;
   const buyerEmail = `${randomUUID()}@example.test`;
-  const config = { ...getConfig(), databaseUrl: databaseUrl!, storageDir, paymentGateway: 'simulated' as const, adminEmails: [adminEmail], clamavHost: '127.0.0.1', clamavPort: address.port };
+  const config = { ...getConfig(), databaseUrl: databaseUrl!, storageDir, supabaseUrl: undefined, paymentGateway: 'simulated' as const, adminEmails: [adminEmail], clamavHost: '127.0.0.1', clamavPort: address.port };
   assert.throws(() => gatewayFor({ ...config, production: true }), { code: 'GATEWAY_UNAVAILABLE' });
   const app = await buildApp(config, { logger: false }); await app.ready();
   const userIds: string[] = [];
@@ -79,8 +78,7 @@ test('venda simulada: publicação, taxa, idempotência, isolamento, entrega e r
   assert.equal(digital.json().status, 'approved');
   const infected = await upload('digital', 'infected.pdf', Buffer.from('%PDF-1.4 EICAR'));
   assert.equal(infected.statusCode, 422);
-  const filePath = join(storageDir, 'scan-test'); await writeFile(filePath, 'test');
-  await assert.rejects(scanFile(filePath, { ...config, clamavHost: undefined }), { code: 'SCANNER_UNAVAILABLE' });
+  await assert.rejects(scanFile(Buffer.from('test'), { ...config, clamavHost: undefined }), { code: 'SCANNER_UNAVAILABLE' });
   const draftInput = { name: 'Guia digital', description: 'Primeira edição do guia digital.', priceCents: 4990, type: 'digital', paymentMethods: ['pix', 'card'], imageAssetId: image.json().id, digitalAssetId: digital.json().id };
   const product = (await post('/seller/products', draftInput, admin)).json();
   assert.equal((await get(`/checkout/${product.publicId}`)).statusCode, 404);

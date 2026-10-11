@@ -9,6 +9,7 @@ import type { FastifyRequest } from 'fastify';
 import type { PrismaClient } from './generated/prisma/client.ts';
 import type { Config } from './lib/config.ts';
 import { createDb } from './lib/db.ts';
+import { createStorage, type ObjectStorage } from './lib/storage.ts';
 import { AppError } from './lib/domain.ts';
 import { hashToken, matchesHash } from './lib/security.ts';
 import { authRoutes } from './modules/auth.ts';
@@ -18,7 +19,7 @@ import { assetRoutes } from './modules/assets.ts';
 
 type Identity = { userId: string; sellerId: string; sessionId: string; csrfHash: string };
 declare module 'fastify' {
-  interface FastifyInstance { db: PrismaClient; config: Config; authenticate: (request: FastifyRequest) => Promise<void> }
+  interface FastifyInstance { db: PrismaClient; config: Config; storage: ObjectStorage; authenticate: (request: FastifyRequest) => Promise<void> }
   interface FastifyRequest { identity: Identity | null }
 }
 export async function buildApp(config: Config, options: { logger?: boolean } = {}) {
@@ -36,6 +37,7 @@ export async function buildApp(config: Config, options: { logger?: boolean } = {
     const db = createDb(config.databaseUrl);
     server.decorate('db', db);
     server.decorate('config', config);
+    server.decorate('storage', createStorage(config));
     server.addHook('onClose', async () => { await db.$disconnect(); });
   }, { name: 'database' }));
   await app.register(fp(async (server) => {

@@ -1,14 +1,14 @@
 import { createConnection } from 'node:net';
-import { createReadStream } from 'node:fs';
+import { Readable } from 'node:stream';
 import { once } from 'node:events';
 import type { Config } from './config.ts';
 import { AppError } from './domain.ts';
 
 // ClamAV INSTREAM: fail closed on unavailable scanner, timeout or protocol error.
-export async function scanFile(path: string, config: Config): Promise<void> {
+export async function scanFile(data: Buffer | Readable, config: Config): Promise<void> {
   if (!config.clamavHost) throw new AppError('SCANNER_UNAVAILABLE', 'A verificação de arquivos não está configurada.', 503);
   const socket = createConnection({ host: config.clamavHost, port: config.clamavPort });
-  const source = createReadStream(path, { highWaterMark: 64 * 1024 });
+  const source = Buffer.isBuffer(data) ? Readable.from(chunked(data)) : data;
   try {
     socket.setTimeout(45_000, () => socket.destroy(new Error('Scan timeout')));
     const result = new Promise<string>((resolve, reject) => {
@@ -34,4 +34,8 @@ export async function scanFile(path: string, config: Config): Promise<void> {
     if (error instanceof AppError) throw error;
     throw new AppError('SCANNER_UNAVAILABLE', 'Não foi possível verificar o arquivo. Aguarde e tente novamente.', 503);
   } finally { source.destroy(); socket.destroy(); }
+}
+
+function* chunked(data: Buffer, size = 64 * 1024) {
+  for (let offset = 0; offset < data.length; offset += size) yield data.subarray(offset, offset + size);
 }

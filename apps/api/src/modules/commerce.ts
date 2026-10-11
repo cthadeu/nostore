@@ -2,9 +2,6 @@ import type { FastifyInstance } from 'fastify';
 import type { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 import { Type } from '@sinclair/typebox';
 import { randomUUID } from 'node:crypto';
-import { open } from 'node:fs/promises';
-import { createReadStream } from 'node:fs';
-import { resolve } from 'node:path';
 import { AppError, calculateFee, isValidDocument } from '../lib/domain.ts';
 import { decrypt, encrypt, hashToken, token } from '../lib/security.ts';
 import { gatewayFor } from '../lib/gateway.ts';
@@ -101,7 +98,7 @@ export async function commerceRoutes(server: FastifyInstance) {
     const product = await app.db.product.findFirst({ where: { publicId: request.params.id, status: 'active', seller: { moderationStatus: 'active' } } });
     const asset = product?.imageAssetId ? await app.db.asset.findFirst({ where: { id: product.imageAssetId, sellerId: product.sellerId, kind: 'image', status: 'approved' } }) : null;
     if (!asset) throw new AppError('NOT_FOUND', 'Imagem não encontrada.', 404);
-    return reply.type('image/webp').send(createReadStream(resolve(app.config.storageDir, asset.storageKey)));
+    return reply.type('image/webp').send(await app.storage.get(asset.storageKey));
   });
   app.post('/checkout/orders', { config: { rateLimit: { max: 15, timeWindow: '1 minute' } }, schema: { body: CheckoutInput, response: { 201: Type.Object({ order: OrderResponse, accessUrl: Type.String() }) } } }, async (request, reply) => {
     const gateway = gatewayFor(app.config);
@@ -194,10 +191,8 @@ export async function commerceRoutes(server: FastifyInstance) {
       if (!claimed.count) throw new AppError('DOWNLOAD_EXPIRED', 'Este link expirou ou já foi utilizado. Gere outro na página do pedido.', 403);
       return asset;
     });
-    let file;
-    try { file = await open(resolve(app.config.storageDir, asset.storageKey), 'r'); }
-    catch { throw new AppError('FILE_UNAVAILABLE', 'Arquivo temporariamente indisponível. Gere outro link e tente novamente.', 503); }
+    const file = await app.storage.get(asset.storageKey);
     reply.header('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(asset.originalName).replace(/'/g, '%27')}`).header('Content-Length', asset.size).header('Referrer-Policy', 'no-referrer').type('application/octet-stream');
-    return reply.send(file.createReadStream());
+    return reply.send(file);
   });
 }
