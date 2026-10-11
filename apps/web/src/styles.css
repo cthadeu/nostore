@@ -170,9 +170,14 @@ legend { font-size: 13px; font-weight: 550; margin-bottom: 15px; }
 .amounts { margin: 25px 0; }
 .amounts>div { display: flex; justify-content: space-between; gap: 15px; padding: 10px 0; font-size: 14px; }
 .amounts .total { border-top: 1px solid var(--line); font-weight: 650; font-size: 19px; }
-.checkout-links { display: grid; gap: 12px; }
-.checkout-links input { font-size: 12px; }
-.editor-aside>.button { margin-top: 15px; }
+/* Product status and actions in the editor aside: one column, every control the same width */
+.product-status { display: inline-flex; align-items: center; gap: 6px; padding: 6px 11px; border-radius: 20px; font-size: 10px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; margin-bottom: 12px; background: white; border: 1px solid var(--line); }
+.product-status--active { background: #e6f1ea; border-color: #cfe3d6; color: #2f6b4a; }
+.product-status--paused { background: #fff1dc; border-color: #f3dfbd; color: #8a5a12; }
+.product-actions { display: grid; gap: 10px; margin-top: 18px; }
+.product-actions button, .product-actions .button { width: 100%; justify-content: center; margin: 0; }
+.product-actions .field { margin-top: 6px; }
+.product-actions input { font-size: 12px; }
 .orders-list { display: grid; gap: 16px; margin-top: 25px; }
 .order-card { padding: 22px; border: 1px solid var(--line); border-radius: 14px; display: flex; flex-wrap: wrap; gap: 22px; justify-content: space-between; margin-top: 15px; }
 .order-card h2 { font-size: 20px; margin: 15px 0; }
