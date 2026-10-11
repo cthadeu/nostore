@@ -67,19 +67,20 @@ model Product {
   status String @default("draft")
   paymentMethods String[]
   imageAssetId String? @db.Uuid
-  digitalAssetId String? @db.Uuid
   shippingDays Int?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   @@index([sellerId, createdAt])
   orders Order[]
+  files ProductFile[]
   @@index([sellerId, status])
 }
 model Asset {
   id String @id @default(uuid()) @db.Uuid
   sellerId String @db.Uuid
   seller Seller @relation(fields: [sellerId], references: [id])
-  purchasedBy Order[]
+  productFiles ProductFile[]
+  orderFiles OrderFile[]
   kind String
   originalName String
   storageKey String @unique
@@ -116,8 +117,6 @@ model Order {
   product Product @relation(fields: [productId], references: [id])
   productName String
   productType String
-  digitalAssetId String? @db.Uuid
-  digitalAsset Asset? @relation(fields: [digitalAssetId], references: [id], onDelete: Restrict)
   buyerName String
   buyerEmail String
   buyerDocumentEncrypted String
@@ -140,6 +139,7 @@ model Order {
   buyerSessions BuyerSession[]
   accessGrants AccessGrant[]
   downloadTickets DownloadTicket[]
+  files OrderFile[]
   @@index([sellerId, createdAt])
   @@index([sellerId, status])
 }
@@ -176,4 +176,23 @@ model BuyerSession {
   tokenHash String @unique
   expiresAt DateTime
   @@index([expiresAt])
+}
+// Digital products are bundles: ordered files, snapshotted per order so later edits never change what was bought.
+model ProductFile {
+  productId String @db.Uuid
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  assetId String @db.Uuid
+  asset Asset @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  position Int
+  @@id([productId, assetId])
+  @@index([assetId])
+}
+model OrderFile {
+  orderId String @db.Uuid
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  assetId String @db.Uuid
+  asset Asset @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  position Int
+  @@id([orderId, assetId])
+  @@index([assetId])
 }

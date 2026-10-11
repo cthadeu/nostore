@@ -39,5 +39,5 @@ export function paymentConfirmedMail(order: { id: string; productName: string; p
 export async function authorizeOrder(tx: Prisma.TransactionClient, raw: string) {
   const grant = await tx.accessGrant.findUnique({ where: { tokenHash: hashToken(raw) } });
   if (!grant || grant.expiresAt <= new Date()) throw new AppError('ACCESS_INVALID', 'Link inválido ou expirado. Solicite outro link pelo e-mail da compra.', 401);
-  return tx.order.findUniqueOrThrow({ where: { id: grant.orderId }, include: { payment: true } });
+  return tx.order.findUniqueOrThrow({ where: { id: grant.orderId }, include: { payment: true, files: true } });
 }

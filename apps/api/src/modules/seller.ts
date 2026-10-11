@@ -10,6 +10,9 @@ import { IdParams, ProductInput, ProductResponse, MessageResponse } from '../lib
 
 export async function sellerRoutes(server: FastifyInstance) {
   const app = server.withTypeProvider<TypeBoxTypeProvider>();
+  // Digital products are bundles of files kept in order.
+  const withFiles = { files: { orderBy: { position: 'asc' as const } } };
+  const present = <T extends { updatedAt: Date; files: { assetId: string }[] }>(product: T) => ({ ...product, digitalAssetIds: product.files.map(f => f.assetId), updatedAt: product.updatedAt.toISOString() });
   app.addHook('onRequest', app.authenticate);
   app.get('/profile', async (request) => {
     const seller = await app.db.seller.findUniqueOrThrow({ where: { id: request.identity!.sellerId }, include: { user: true } });
@@ -32,45 +35,48 @@ export async function sellerRoutes(server: FastifyInstance) {
   app.get('/products', { schema: { querystring: Type.Object({ page: Type.Integer({ minimum: 1, default: 1 }), limit: Type.Integer({ minimum: 1, maximum: 50, default: 12 }) }), response: { 200: Type.Object({ items: Type.Array(ProductResponse), total: Type.Integer(), activeCount: Type.Integer() }) } } }, async (request) => {
     const where = { sellerId: request.identity!.sellerId };
     const [items, total, activeCount] = await Promise.all([
-      app.db.product.findMany({ where, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], skip: (request.query.page - 1) * request.query.limit, take: request.query.limit }),
+      app.db.product.findMany({ where, include: withFiles, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], skip: (request.query.page - 1) * request.query.limit, take: request.query.limit }),
       app.db.product.count({ where }), app.db.product.count({ where: { ...where, status: 'active' } }),
     ]);
-    return { items: items.map((item) => ({ ...item, updatedAt: item.updatedAt.toISOString() })), total, activeCount };
+    return { items: items.map(present), total, activeCount };
   });
   app.get('/products/:id', { schema: { params: IdParams, response: { 200: ProductResponse } } }, async (request) => {
-    const product = await app.db.product.findFirst({ where: { id: request.params.id, sellerId: request.identity!.sellerId } });
+    const product = await app.db.product.findFirst({ where: { id: request.params.id, sellerId: request.identity!.sellerId }, include: withFiles });
     if (!product) throw new AppError('NOT_FOUND', 'Produto não encontrado.', 404);
-    return { ...product, updatedAt: product.updatedAt.toISOString() };
+    return present(product);
   });
-  async function validateAssets(sellerId: string, imageAssetId?: string | null, digitalAssetId?: string | null) {
-    for (const [id, kind] of [[imageAssetId, 'image'], [digitalAssetId, 'digital']] as const) {
-      if (id && !await app.db.asset.findFirst({ where: { id, sellerId, kind } })) throw new AppError('ASSET_INVALID', 'Arquivo não disponível para esta conta.');
-    }
+  async function validateAssets(sellerId: string, imageAssetId: string | null | undefined, digitalAssetIds: string[]) {
+    if (imageAssetId && !await app.db.asset.findFirst({ where: { id: imageAssetId, sellerId, kind: 'image' } })) throw new AppError('ASSET_INVALID', 'Arquivo não disponível para esta conta.');
+    if (new Set(digitalAssetIds).size !== digitalAssetIds.length) throw new AppError('ASSET_INVALID', 'Arquivo repetido no pacote.');
+    if (digitalAssetIds.length && await app.db.asset.count({ where: { id: { in: digitalAssetIds }, sellerId, kind: 'digital' } }) !== digitalAssetIds.length) throw new AppError('ASSET_INVALID', 'Arquivo não disponível para esta conta.');
   }
+  const fileRows = (ids: string[]) => ids.map((assetId, position) => ({ assetId, position }));
   app.post('/products', { schema: { body: ProductInput, response: { 201: ProductResponse } } }, async (request, reply) => {
     const sellerId = request.identity!.sellerId;
-    await validateAssets(sellerId, request.body.imageAssetId, request.body.digitalAssetId);
-    const product = await app.db.product.create({ data: { ...request.body, name: request.body.name.trim(), sellerId } });
+    const { digitalAssetIds = [], ...body } = request.body;
+    await validateAssets(sellerId, body.imageAssetId, digitalAssetIds);
+    const product = await app.db.product.create({ data: { ...body, name: body.name.trim(), sellerId, files: { create: fileRows(digitalAssetIds) } }, include: withFiles });
     reply.code(201);
-    return { ...product, updatedAt: product.updatedAt.toISOString() };
+    return present(product);
   });
   app.patch('/products/:id', { schema: { params: IdParams, body: ProductInput, response: { 200: ProductResponse } } }, async (request) => {
     const sellerId = request.identity!.sellerId;
-    await validateAssets(sellerId, request.body.imageAssetId, request.body.digitalAssetId);
+    const { digitalAssetIds = [], ...body } = request.body;
+    await validateAssets(sellerId, body.imageAssetId, digitalAssetIds);
     return app.db.$transaction(async tx => {
       await tx.$queryRaw`SELECT id FROM "Seller" WHERE id = ${sellerId}::uuid FOR UPDATE`;
       const product = await tx.product.findFirst({ where: { id: request.params.id, sellerId } });
       if (!product) throw new AppError('NOT_FOUND', 'Produto não encontrado.', 404);
       if (product.status === 'active') throw new AppError('PAUSE_FIRST', 'Pause o produto antes de editar.', 409);
-      const updated = await tx.product.update({ where: { id: product.id }, data: request.body });
-      return { ...updated, updatedAt: updated.updatedAt.toISOString() };
+      const updated = await tx.product.update({ where: { id: product.id }, data: { ...body, files: { deleteMany: {}, create: fileRows(digitalAssetIds) } }, include: withFiles });
+      return present(updated);
     });
   });
   app.post('/products/:id/publish', { schema: { params: IdParams, response: { 200: MessageResponse } } }, async (request) => {
     gatewayFor(app.config);
-    const candidate = await app.db.product.findFirst({ where: { id: request.params.id, sellerId: request.identity!.sellerId } });
-    if (candidate?.digitalAssetId) {
-      const asset = await app.db.asset.findFirst({ where: { id: candidate.digitalAssetId, sellerId: request.identity!.sellerId, kind: 'digital' } });
+    const candidate = await app.db.product.findFirst({ where: { id: request.params.id, sellerId: request.identity!.sellerId }, include: withFiles });
+    for (const file of candidate?.files ?? []) {
+      const asset = await app.db.asset.findFirst({ where: { id: file.assetId, sellerId: request.identity!.sellerId, kind: 'digital' } });
       if (asset && asset.status === 'quarantined') {
         await scanFile(await app.storage.get(asset.storageKey), app.config);
         await app.db.asset.update({ where: { id: asset.id }, data: { status: 'approved' } });
@@ -80,7 +86,7 @@ export async function sellerRoutes(server: FastifyInstance) {
       const sellerId = request.identity!.sellerId;
       await tx.$queryRaw`SELECT id FROM "Seller" WHERE id = ${sellerId}::uuid FOR UPDATE`;
       const seller = await tx.seller.findUniqueOrThrow({ where: { id: sellerId }, include: { user: true } });
-      const product = await tx.product.findFirst({ where: { id: request.params.id, sellerId } });
+      const product = await tx.product.findFirst({ where: { id: request.params.id, sellerId }, include: withFiles });
       if (!product) throw new AppError('NOT_FOUND', 'Produto não encontrado.', 404);
       if (seller.moderationStatus !== 'active') throw new AppError('SELLER_SUSPENDED', 'Esta conta não pode publicar produtos.', 403);
       if (product.status === 'active') return;
@@ -88,10 +94,12 @@ export async function sellerRoutes(server: FastifyInstance) {
       if (!seller.user.emailVerifiedAt) throw new AppError('EMAIL_UNVERIFIED', 'Confirme seu e-mail antes de publicar.', 409);
       if (!product.name.trim() || product.description.trim().length < 10) throw new AppError('PRODUCT_INCOMPLETE', 'Complete os dados do produto.', 409);
       if (!product.imageAssetId || !await tx.asset.findFirst({ where: { id: product.imageAssetId, sellerId, kind: 'image', status: 'approved' } })) throw new AppError('IMAGE_REQUIRED', 'Adicione uma imagem ao produto.', 409);
-      if (product.type === 'digital' && (!product.digitalAssetId || !await tx.asset.findFirst({ where: { id: product.digitalAssetId, sellerId, kind: 'digital', status: 'approved' } }))) throw new AppError('DIGITAL_FILE_REQUIRED', 'Adicione um arquivo digital aprovado.', 409);
+      const fileIds = product.files.map(f => f.assetId);
+      if (product.type === 'digital' && (!fileIds.length || await tx.asset.count({ where: { id: { in: fileIds }, sellerId, kind: 'digital', status: 'approved' } }) !== fileIds.length)) throw new AppError('DIGITAL_FILE_REQUIRED', 'Adicione um arquivo digital aprovado.', 409);
       if (product.type === 'physical' && !product.shippingDays) throw new AppError('SHIPPING_REQUIRED', 'Informe o prazo de postagem.', 409);
       await tx.product.update({ where: { id: product.id }, data: { status: 'active' } });
-    });
+    // Publications serialize on the seller row; allow for remote-database latency under concurrency.
+    }, { maxWait: 10_000, timeout: 20_000 });
     return { message: 'Produto publicado.' };
   });
   app.post('/products/:id/pause', { schema: { params: IdParams, response: { 200: MessageResponse } } }, async (request) => {

@@ -1,4 +1,6 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
+import type { Prisma } from '../generated/prisma/client.ts';
+import { ZipFile } from 'yazl';
 import type { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 import { Type } from '@sinclair/typebox';
 import { randomUUID } from 'node:crypto';
@@ -121,19 +123,19 @@ export async function commerceRoutes(server: FastifyInstance) {
       if (!candidate) throw new AppError('NOT_FOUND', 'Produto indisponível.', 404);
       await tx.$queryRaw`SELECT id FROM "Seller" WHERE id = ${candidate.sellerId}::uuid FOR UPDATE`;
       await tx.$queryRaw`SELECT pg_advisory_xact_lock(730001)::text`;
-      const product = await tx.product.findUniqueOrThrow({ where: { id: candidate.id }, include: { seller: { include: { user: true } } } });
+      const product = await tx.product.findUniqueOrThrow({ where: { id: candidate.id }, include: { seller: { include: { user: true } }, files: { orderBy: { position: 'asc' } } } });
       if (product.status !== 'active' || product.seller.moderationStatus !== 'active' || !product.seller.user.emailVerifiedAt) throw new AppError('PRODUCT_UNAVAILABLE', 'Produto indisponível.', 409);
       const fee = await currentFee(tx);
       if (fee.id !== input.feePolicyId || product.updatedAt.toISOString() !== input.productVersion) throw new AppError('PRICE_CHANGED', 'As condições do produto mudaram. Atualize o checkout antes de continuar.', 409);
       if (!product.paymentMethods.includes(input.method)) throw new AppError('METHOD_INVALID', 'Forma de pagamento indisponível.');
       if (product.type === 'physical' && !input.address) throw new AppError('ADDRESS_REQUIRED', 'Informe o endereço de entrega.');
-      if (product.type === 'digital' && (!product.digitalAssetId || !await tx.asset.findFirst({ where: { id: product.digitalAssetId, sellerId: product.sellerId, status: 'approved', kind: 'digital' } }))) throw new AppError('FILE_UNAVAILABLE', 'Arquivo indisponível para venda.', 409);
+      if (product.type === 'digital' && (!product.files.length || await tx.asset.count({ where: { id: { in: product.files.map(f => f.assetId) }, sellerId: product.sellerId, status: 'approved', kind: 'digital' } }) !== product.files.length)) throw new AppError('FILE_UNAVAILABLE', 'Arquivo indisponível para venda.', 409);
       const id = randomUUID();
       const amounts = calculateFee(product.priceCents, fee.basisPoints);
       const payment = gateway.create({ orderId: id, ...amounts, sellerCents: amounts.priceCents, method: input.method });
       const order = await tx.order.create({ data: {
         id, sellerId: product.sellerId, productId: product.id, productName: product.name, productType: product.type,
-        digitalAssetId: product.type === 'digital' ? product.digitalAssetId : null,
+        files: { create: product.type === 'digital' ? product.files.map(f => ({ assetId: f.assetId, position: f.position })) : [] },
         buyerName: input.buyerName, buyerEmail: input.buyerEmail, buyerDocumentEncrypted: encrypt(input.buyerDocument, app.config.encryptionKey),
         addressEncrypted: product.type === 'physical' ? encrypt(JSON.stringify(input.address), app.config.encryptionKey) : null,
         ...amounts, feePolicyId: fee.id, feeBasisPoints: fee.basisPoints, gateway: gateway.name, checkoutKeyHash: keyHash, requestHash,
@@ -159,7 +161,7 @@ export async function commerceRoutes(server: FastifyInstance) {
     if (raw) return authorizeOrder(app.db, raw);
     const session = cookie && /^[a-f0-9]{64}$/.test(cookie) ? await app.db.buyerSession.findUnique({ where: { tokenHash: hashToken(cookie) } }) : null;
     if (!session || session.expiresAt <= new Date()) throw new AppError('ACCESS_INVALID', 'Acesso expirado. Solicite outro link pelo e-mail da compra.', 401);
-    return app.db.order.findUniqueOrThrow({ where: { id: session.orderId }, include: { payment: true } });
+    return app.db.order.findUniqueOrThrow({ where: { id: session.orderId }, include: { payment: true, files: true } });
   }
   app.post('/buyer/order', { schema: { body: BuyerBody, response: { 200: OrderResponse } } }, async request => publicOrder(await buyerOrder(request.body.token, request.cookies.nostore_buyer)));
   app.post('/buyer/renew-access', { config: { rateLimit: { max: 5, timeWindow: '1 hour' } }, schema: { body: Type.Object({ orderId: Type.String({ format: 'uuid' }), email: Type.String({ format: 'email', maxLength: 254 }) }, { additionalProperties: false }), response: { 200: MessageResponse } } }, async request => {
@@ -176,37 +178,58 @@ export async function commerceRoutes(server: FastifyInstance) {
     const raw = token();
     const order = await buyerOrder(request.body.token, request.cookies.nostore_buyer);
     await app.db.$transaction(async tx => {
-      if (order.status !== 'paid' || !order.digitalAssetId || !order.downloadUntil || order.downloadUntil <= new Date()) throw new AppError('DOWNLOAD_FORBIDDEN', 'O download não está disponível para este pedido.', 403);
+      if (order.status !== 'paid' || !order.files.length || !order.downloadUntil || order.downloadUntil <= new Date()) throw new AppError('DOWNLOAD_FORBIDDEN', 'O download não está disponível para este pedido.', 403);
       await tx.downloadTicket.create({ data: { orderId: order.id, tokenHash: hashToken(raw), expiresAt: new Date(Date.now() + 60_000) } });
     });
     reply.code(201); return { url: `/api/v1/buyer/download?ticket=${raw}`, expiresIn: 60 };
   });
   app.get('/buyer/download', { schema: { querystring: Type.Object({ ticket: Type.String({ pattern: '^[a-f0-9]{64}$' }) }, { additionalProperties: false }) } }, async (request, reply) => {
-    const asset = await app.db.$transaction(async tx => {
+    const { order, assets } = await app.db.$transaction(async tx => {
       const ticket = await tx.downloadTicket.findUnique({ where: { tokenHash: hashToken(request.query.ticket) } });
       if (!ticket) throw new AppError('DOWNLOAD_EXPIRED', 'Link de download inválido ou expirado.', 403);
       await tx.$queryRaw`SELECT id FROM "Order" WHERE id = ${ticket.orderId}::uuid FOR UPDATE`;
-      const order = await tx.order.findUniqueOrThrow({ where: { id: ticket.orderId } });
-      if (order.status !== 'paid' || !order.digitalAssetId || !order.downloadUntil || order.downloadUntil <= new Date()) throw new AppError('DOWNLOAD_FORBIDDEN', 'O download não está disponível para este pedido.', 403);
-      const asset = await tx.asset.findFirst({ where: { id: order.digitalAssetId, sellerId: order.sellerId, kind: 'digital', status: 'approved' } });
-      if (!asset) throw new AppError('FILE_UNAVAILABLE', 'Arquivo indisponível. Entre em contato com o vendedor.', 409);
+      const order = await tx.order.findUniqueOrThrow({ where: { id: ticket.orderId }, include: { files: true } });
+      if (order.status !== 'paid' || !order.files.length || !order.downloadUntil || order.downloadUntil <= new Date()) throw new AppError('DOWNLOAD_FORBIDDEN', 'O download não está disponível para este pedido.', 403);
+      const assets = await orderAssets(tx, order);
       const claimed = await tx.downloadTicket.updateMany({ where: { id: ticket.id, usedAt: null, expiresAt: { gt: new Date() } }, data: { usedAt: new Date() } });
       if (!claimed.count) throw new AppError('DOWNLOAD_EXPIRED', 'Este link expirou ou já foi utilizado. Gere outro na página do pedido.', 403);
-      return asset;
+      return { order, assets };
     });
-    return sendAsset(reply, asset);
+    return sendBundle(reply, order.productName, assets);
   });
   // Permanent download link sent by e-mail: the access token identifies a paid digital order.
   app.get('/buyer/file', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } }, schema: { querystring: Type.Object({ token: Type.String({ pattern: '^[a-f0-9]{64}$' }) }, { additionalProperties: false }) } }, async (request, reply) => {
     const order = await authorizeOrder(app.db, request.query.token);
-    if (order.status !== 'paid' || !order.digitalAssetId || !order.downloadUntil || order.downloadUntil <= new Date()) throw new AppError('DOWNLOAD_FORBIDDEN', 'O download não está disponível para este pedido.', 403);
-    const asset = await app.db.asset.findFirst({ where: { id: order.digitalAssetId, sellerId: order.sellerId, kind: 'digital', status: 'approved' } });
-    if (!asset) throw new AppError('FILE_UNAVAILABLE', 'Arquivo indisponível. Entre em contato com o vendedor.', 409);
-    return sendAsset(reply, asset);
+    if (order.status !== 'paid' || !order.files.length || !order.downloadUntil || order.downloadUntil <= new Date()) throw new AppError('DOWNLOAD_FORBIDDEN', 'O download não está disponível para este pedido.', 403);
+    return sendBundle(reply, order.productName, await orderAssets(app.db, order));
   });
-  async function sendAsset(reply: FastifyReply, asset: { storageKey: string; originalName: string; size: number }) {
-    const file = await app.storage.get(asset.storageKey);
-    reply.header('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(asset.originalName).replace(/'/g, '%27')}`).header('Content-Length', asset.size).header('Referrer-Policy', 'no-referrer').type('application/octet-stream');
-    return reply.send(file);
+  // Resolves the files bought with an order, in bundle order, and fails if any is no longer approved.
+  async function orderAssets(db: Pick<Prisma.TransactionClient, 'asset'>, order: { sellerId: string; files: { assetId: string; position: number }[] }) {
+    const ids = order.files.map(f => f.assetId);
+    const assets = ids.length ? await db.asset.findMany({ where: { id: { in: ids }, sellerId: order.sellerId, kind: 'digital', status: 'approved' } }) : [];
+    if (!ids.length || assets.length !== ids.length) throw new AppError('FILE_UNAVAILABLE', 'Arquivo indisponível. Entre em contato com o vendedor.', 409);
+    const byId = new Map(assets.map(a => [a.id, a]));
+    return [...order.files].sort((a, b) => a.position - b.position).map(f => byId.get(f.assetId)!);
+  }
+  const disposition = (name: string) => `attachment; filename*=UTF-8''${encodeURIComponent(name).replace(/'/g, '%27')}`;
+  // A single file is sent as is; a bundle is streamed as one ZIP (stored, the files are already compressed formats).
+  async function sendBundle(reply: FastifyReply, productName: string, assets: { storageKey: string; originalName: string; size: number }[]) {
+    reply.header('Referrer-Policy', 'no-referrer').type('application/octet-stream');
+    if (assets.length === 1) {
+      const asset = assets[0]!;
+      reply.header('Content-Disposition', disposition(asset.originalName)).header('Content-Length', asset.size);
+      return reply.send(await app.storage.get(asset.storageKey));
+    }
+    const zip = new ZipFile();
+    const names = new Set<string>();
+    for (const asset of assets) {
+      let name = asset.originalName.replace(/[\\/]+/g, '_').trim() || 'arquivo';
+      for (let n = 2; names.has(name); n++) name = asset.originalName.replace(/(\.[^.]*)?$/, `-${n}$1`);
+      names.add(name);
+      zip.addReadStream(await app.storage.get(asset.storageKey), name, { compress: false });
+    }
+    zip.end();
+    reply.header('Content-Disposition', disposition(`${productName.replace(/[\\/]+/g, '_').trim() || 'pacote'}.zip`));
+    return reply.send(zip.outputStream);
   }
 }
