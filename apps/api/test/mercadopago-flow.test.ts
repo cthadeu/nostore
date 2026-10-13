@@ -95,7 +95,7 @@ test('Mercado Pago: OAuth do vendedor, Pix via webhook, cartão aprovado e reemb
   const created = pixOrder.json().order;
   assert.equal(created.status, 'pending'); assert.equal(created.pix.qrCode, 'pix-1000'); assert.equal(created.pix.qrCodeBase64, 'QUJD');
   const paymentCall = mp.calls.find(c => c.path === '/v1/payments' && c.method === 'POST')!;
-  assert.equal((paymentCall.body as { application_fee: number }).application_fee, offer.feeCents / 100); assert.equal((paymentCall.body as { transaction_amount: number }).transaction_amount, offer.totalCents / 100);
+  assert.equal((paymentCall.body as { application_fee?: number }).application_fee, offer.feeCents > 0 ? offer.feeCents / 100 : undefined, 'application_fee só vai quando há taxa'); assert.equal((paymentCall.body as { transaction_amount: number }).transaction_amount, offer.totalCents / 100);
   assert.equal((await post('/checkout/orders', { ...input, checkoutToken: pixToken })).json().order.id, created.id, 'retentativa não cria outro pagamento');
   assert.equal(mp.calls.filter(c => c.path === '/v1/payments' && c.method === 'POST').length, 1);
   const webhook = (dataId: string, secret = webhookSecret, requestId = randomUUID()) => {

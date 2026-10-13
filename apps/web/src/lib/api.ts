@@ -2,8 +2,9 @@ export class ApiError extends Error {
   status: number;
   constructor(message: string, status: number) { super(message); this.status = status; }
 }
+export const csrfToken = () => document.cookie.split('; ').find((value) => value.startsWith('nostore_csrf='))?.split('=')[1];
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const csrf = document.cookie.split('; ').find((value) => value.startsWith('nostore_csrf='))?.split('=')[1];
+  const csrf = csrfToken();
   const response = await fetch(`/api/v1${path}`, { ...init, credentials: 'same-origin', headers: { ...(init.body && !(init.body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}), ...(csrf ? { 'X-CSRF-Token': csrf } : {}), ...init.headers } });
   const body = await response.json().catch(() => null);
   if (!response.ok) throw new ApiError(body?.message ?? 'Não foi possível conectar. Tente novamente.', response.status);

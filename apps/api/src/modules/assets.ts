@@ -1,16 +1,67 @@
 import type { FastifyInstance } from 'fastify';
+import type { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
+import { Type } from '@sinclair/typebox';
+import type { Readable } from 'node:stream';
+import { issueSignedToken } from '@vercel/blob';
+import { handleUploadPresigned } from '@vercel/blob/client';
 import { basename } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import sharp from 'sharp';
 import { scanFile } from '../lib/scanner.ts';
 import { AppError } from '../lib/domain.ts';
 
-export async function assetRoutes(app: FastifyInstance) {
+// Serverless request bodies are capped at 4.5 MB, so images go through the API while digital files
+// are uploaded by the browser straight to the object store with a presigned URL (start → presign →
+// complete). The local disk backend keeps the direct API upload.
+const IMAGE_LIMIT = 4 * 1024 * 1024, DIGITAL_LIMIT = 100 * 1024 * 1024;
+const DIGITAL_TYPES = ['application/pdf', 'application/zip', 'application/x-zip-compressed', 'application/epub+zip', 'application/octet-stream'];
+async function readHead(stream: Readable, bytes: number): Promise<Buffer> {
+  const chunks: Buffer[] = []; let total = 0;
+  for await (const chunk of stream) { chunks.push(chunk as Buffer); total += (chunk as Buffer).length; if (total >= bytes) break; }
+  stream.destroy();
+  return Buffer.concat(chunks).subarray(0, bytes);
+}
+export async function assetRoutes(server: FastifyInstance) {
+  const app = server.withTypeProvider<TypeBoxTypeProvider>();
   app.addHook('onRequest', app.authenticate);
+  const directUploads = () => app.config.fileStorage === 'blob' && Boolean(process.env.BLOB_WEBHOOK_PUBLIC_KEY);
+  app.post('/digital/start', { schema: { body: Type.Object({ name: Type.String({ minLength: 1, maxLength: 255 }), size: Type.Integer({ minimum: 1, maximum: DIGITAL_LIMIT }), contentType: Type.String({ maxLength: 120 }) }, { additionalProperties: false }) } }, async (request, reply) => {
+    if (!directUploads()) return { mode: 'api', maxApiBytes: IMAGE_LIMIT };
+    const key = randomUUID();
+    const asset = await app.db.asset.create({ data: { sellerId: request.identity!.sellerId, kind: 'digital', storageKey: key, originalName: basename(request.body.name).slice(0, 200), mimeType: request.body.contentType || 'application/octet-stream', size: request.body.size, status: 'uploading' } });
+    reply.code(201);
+    return { mode: 'direct', id: asset.id, pathname: app.storage.pathname(key) };
+  });
+  // Called by the browser SDK: issues a short-lived token bound to one pending asset of this seller.
+  app.post('/digital/presign', async request => {
+    const sellerId = request.identity!.sellerId;
+    return handleUploadPresigned({
+      body: request.body as Parameters<typeof handleUploadPresigned>[0]['body'], request: request.raw,
+      getSignedToken: async (pathname, clientPayload) => {
+        const asset = clientPayload ? await app.db.asset.findFirst({ where: { id: clientPayload, sellerId, kind: 'digital', status: 'uploading' } }) : null;
+        if (!asset || pathname !== app.storage.pathname(asset.storageKey)) throw new AppError('ASSET_INVALID', 'Envio não autorizado.', 403);
+        const token = await issueSignedToken({ pathname, operations: ['put'], maximumSizeInBytes: DIGITAL_LIMIT, allowedContentTypes: DIGITAL_TYPES, validUntil: Date.now() + 30 * 60_000 });
+        return { token };
+      },
+    });
+  });
+  app.post('/digital/:id/complete', { schema: { params: Type.Object({ id: Type.String({ format: 'uuid' }) }) } }, async request => {
+    const asset = await app.db.asset.findFirst({ where: { id: request.params.id, sellerId: request.identity!.sellerId, kind: 'digital', status: 'uploading' } });
+    if (!asset) throw new AppError('NOT_FOUND', 'Envio não encontrado.', 404);
+    const info = await app.storage.stat(asset.storageKey);
+    if (!info) throw new AppError('UPLOAD_INCOMPLETE', 'O arquivo ainda não chegou ao armazenamento. Tente novamente.', 409);
+    const head = await readHead(await app.storage.get(asset.storageKey), 8);
+    const pdf = head.subarray(0, 5).toString() === '%PDF-';
+    const zip = head.subarray(0, 4).equals(Buffer.from([0x50, 0x4b, 0x03, 0x04]));
+    if (!pdf && !zip) { await app.storage.delete(asset.storageKey); await app.db.asset.delete({ where: { id: asset.id } }); throw new AppError('INVALID_FILE', 'Envie um arquivo PDF, EPUB ou ZIP válido.'); }
+    if (app.config.fileScan !== 'off') await scanFile(await app.storage.get(asset.storageKey), app.config);
+    const updated = await app.db.asset.update({ where: { id: asset.id }, data: { status: 'approved', size: info.size, mimeType: pdf ? 'application/pdf' : 'application/zip' } });
+    return { id: updated.id, name: updated.originalName, status: updated.status, size: updated.size };
+  });
   app.post<{ Params: { kind: string } }>('/:kind', async (request, reply) => {
     const kind = request.params.kind;
     if (kind !== 'image' && kind !== 'digital') throw new AppError('INVALID_KIND', 'Tipo de arquivo inválido.');
-    const file = await request.file({ limits: { fileSize: kind === 'image' ? 8 * 1024 * 1024 : 100 * 1024 * 1024, files: 1, parts: 1 } });
+    const file = await request.file({ limits: { fileSize: kind === 'image' ? IMAGE_LIMIT : DIGITAL_LIMIT, files: 1, parts: 1 } });
     if (!file) throw new AppError('FILE_REQUIRED', 'Selecione um arquivo.');
     const chunks: Buffer[] = [];
     try { for await (const chunk of file.file) chunks.push(chunk as Buffer); }

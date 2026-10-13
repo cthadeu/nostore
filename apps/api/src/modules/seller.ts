@@ -48,7 +48,7 @@ export async function sellerRoutes(server: FastifyInstance) {
   async function validateAssets(sellerId: string, imageAssetId: string | null | undefined, digitalAssetIds: string[]) {
     if (imageAssetId && !await app.db.asset.findFirst({ where: { id: imageAssetId, sellerId, kind: 'image' } })) throw new AppError('ASSET_INVALID', 'Arquivo não disponível para esta conta.');
     if (new Set(digitalAssetIds).size !== digitalAssetIds.length) throw new AppError('ASSET_INVALID', 'Arquivo repetido no pacote.');
-    if (digitalAssetIds.length && await app.db.asset.count({ where: { id: { in: digitalAssetIds }, sellerId, kind: 'digital' } }) !== digitalAssetIds.length) throw new AppError('ASSET_INVALID', 'Arquivo não disponível para esta conta.');
+    if (digitalAssetIds.length && await app.db.asset.count({ where: { id: { in: digitalAssetIds }, sellerId, kind: 'digital', status: { not: 'uploading' } } }) !== digitalAssetIds.length) throw new AppError('ASSET_INVALID', 'Arquivo não disponível para esta conta.');
   }
   const fileRows = (ids: string[]) => ids.map((assetId, position) => ({ assetId, position }));
   app.post('/products', { schema: { body: ProductInput, response: { 201: ProductResponse } } }, async (request, reply) => {

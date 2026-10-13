@@ -3,7 +3,8 @@ import type { FormEvent } from 'react';
 import { Link, Navigate, useNavigate, useParams, useLocation } from 'react-router';
 import useSWR, { useSWRConfig } from 'swr';
 import { Button } from '@heroui/react/button';
-import { api, ApiError } from '../lib/api';
+import { uploadPresigned } from '@vercel/blob/client';
+import { api, ApiError, csrfToken } from '../lib/api';
 import type { Product, Profile } from '../lib/api';
 import { Brand, Field, Notice, Pending, Submit } from '../components/ui';
 
@@ -38,15 +39,31 @@ function Editor({ product, gateway }: { product?: Product; gateway: string }) {
     const form = new FormData(event.currentTarget);
     setPending(true); setError('');
     try {
+      const IMAGE_LIMIT = 4 * 1024 * 1024;
       async function upload(name: string, kind: string, existing: string | null) {
         const file = form.get(name);
         if (!(file instanceof File) || file.size === 0) return existing;
+        if (file.size > IMAGE_LIMIT) throw new Error('A imagem deve ter até 4 MB.');
         const data = new FormData(); data.append('file', file);
         return (await api<{ id: string }>(`/seller/assets/${kind}`, { method: 'POST', body: data })).id;
       }
+      // Digital files go straight from the browser to the object store (no request-size limit);
+      // the API registers the file first and validates it after the upload finishes.
+      async function uploadDigital(file: File) {
+        const contentType = file.type || 'application/octet-stream';
+        const start = await api<{ mode: 'direct' | 'api'; id?: string; pathname?: string; maxApiBytes?: number }>('/seller/assets/digital/start', { method: 'POST', body: JSON.stringify({ name: file.name, size: file.size, contentType }) });
+        if (start.mode !== 'direct') {
+          if (start.maxApiBytes && file.size > start.maxApiBytes) throw new Error(`${file.name}: arquivos acima de ${Math.floor(start.maxApiBytes / 1048576)} MB não são aceitos neste ambiente.`);
+          const data = new FormData(); data.append('file', file);
+          return (await api<{ id: string }>('/seller/assets/digital', { method: 'POST', body: data })).id;
+        }
+        const csrf = csrfToken();
+        await uploadPresigned(start.pathname!, file, { access: 'private', contentType, handleUploadUrl: '/api/v1/seller/assets/digital/presign', clientPayload: start.id, multipart: file.size > 8 * 1024 * 1024, headers: csrf ? { 'X-CSRF-Token': csrf } : {} });
+        return (await api<{ id: string }>(`/seller/assets/digital/${start.id}/complete`, { method: 'POST' })).id;
+      }
       async function uploadBundle() {
         const ids = kept.map(f => f.id);
-        for (const file of added) { const data = new FormData(); data.append('file', file); ids.push((await api<{ id: string }>('/seller/assets/digital', { method: 'POST', body: data })).id); }
+        for (const file of added) ids.push(await uploadDigital(file));
         return ids;
       }
       const [imageAssetId, digitalAssetIds] = await Promise.all([upload('image', 'image', product?.imageAssetId ?? null), type === 'digital' ? uploadBundle() : Promise.resolve([] as string[])]);

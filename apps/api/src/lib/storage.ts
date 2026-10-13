@@ -1,7 +1,7 @@
-import { mkdir, open, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, open, stat, unlink, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { Readable } from 'node:stream';
-import { put, get, del } from '@vercel/blob';
+import { put, get, del, head } from '@vercel/blob';
 import type { Config } from './config.ts';
 import { AppError } from './domain.ts';
 
@@ -11,6 +11,10 @@ export interface ObjectStorage {
   put(key: string, data: Buffer, contentType: string): Promise<void>;
   get(key: string): Promise<Readable>;
   delete(key: string): Promise<void>;
+  /** Size of a stored object, or null when it does not exist (yet). */
+  stat(key: string): Promise<{ size: number } | null>;
+  /** Object path as the storage backend names it (used for browser uploads). */
+  pathname(key: string): string;
 }
 
 const unavailable = () => new AppError('FILE_UNAVAILABLE', 'Arquivo temporariamente indisponível. Tente novamente.', 503);
@@ -29,6 +33,8 @@ function localStorage(dir: string): ObjectStorage {
       return file.createReadStream();
     },
     async delete(key) { validKey(key); await unlink(resolve(dir, key)).catch(() => {}); },
+    async stat(key) { validKey(key); try { return { size: (await stat(resolve(dir, key))).size }; } catch { return null; } },
+    pathname(key) { validKey(key); return key; },
   };
 }
 
@@ -46,5 +52,7 @@ function blobStorage(): ObjectStorage {
       return Readable.fromWeb(result.stream as import('node:stream/web').ReadableStream);
     },
     async delete(key) { await del(pathname(key)); },
+    async stat(key) { try { const info = await head(pathname(key)); return info ? { size: info.size } : null; } catch { return null; } },
+    pathname,
   };
 }
