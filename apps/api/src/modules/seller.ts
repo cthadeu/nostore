@@ -34,11 +34,11 @@ export async function sellerRoutes(server: FastifyInstance) {
   });
   app.get('/products', { schema: { querystring: Type.Object({ page: Type.Integer({ minimum: 1, default: 1 }), limit: Type.Integer({ minimum: 1, maximum: 50, default: 12 }) }), response: { 200: Type.Object({ items: Type.Array(ProductResponse), total: Type.Integer(), activeCount: Type.Integer() }) } } }, async (request) => {
     const where = { sellerId: request.identity!.sellerId };
-    const [items, total, activeCount] = await Promise.all([
+    const [items, counts] = await Promise.all([
       app.db.product.findMany({ where, include: withFiles, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], skip: (request.query.page - 1) * request.query.limit, take: request.query.limit }),
-      app.db.product.count({ where }), app.db.product.count({ where: { ...where, status: 'active' } }),
+      app.db.product.groupBy({ by: ['status'], where, _count: true }),
     ]);
-    return { items: items.map(present), total, activeCount };
+    return { items: items.map(present), total: counts.reduce((sum, row) => sum + row._count, 0), activeCount: counts.find(row => row.status === 'active')?._count ?? 0 };
   });
   app.get('/products/:id', { schema: { params: IdParams, response: { 200: ProductResponse } } }, async (request) => {
     const product = await app.db.product.findFirst({ where: { id: request.params.id, sellerId: request.identity!.sellerId }, include: withFiles });
