@@ -34,6 +34,10 @@ _Avoid_: Conta vendedora, conta bancária.
 Conta bancária indicada para recebimento dos recursos conforme as condições do provedor de pagamento.
 _Avoid_: Recebedor, conta vendedora.
 
+**Conexão Mercado Pago**:
+Autorização, feita por OAuth em Recebimento, pela qual o vendedor vincula sua conta de pagamento à nostore; pré-requisito para publicar e manter produtos à venda.
+_Avoid_: Credenciais do gateway, conta vendedora, cadastro de dados bancários.
+
 ### Oferta e entrega
 
 **Produto**:
@@ -44,6 +48,22 @@ _Avoid_: Loja, arquivo, pedido como sinônimos.
 Produto publicado que ocupa uma posição no limite de produtos ativos da conta vendedora; a possibilidade de compra também depende das demais condições de venda.
 _Avoid_: Produto cadastrado, produto com vendas.
 
+**Produto pausado**:
+Produto retirado de venda pelo vendedor para edição; não ocupa posição no limite e volta a vender ao ser publicado novamente.
+_Avoid_: Produto suspenso, rascunho, produto excluído.
+
+**Pacote digital**:
+Conjunto ordenado de arquivos (PDF, EPUB ou ZIP) que compõe um produto digital; com mais de um arquivo, o comprador recebe tudo em um único ZIP.
+_Avoid_: Arquivo do produto, anexo, produto como sinônimo de cada arquivo.
+
+**Personalização de PDF**:
+Opção do produto que carimba nome e CPF/CNPJ do comprador no rodapé de cada página dos PDFs no momento do download.
+_Avoid_: Marca d'água de segurança, proteção contra cópia, DRM.
+
+**Varredura de arquivo**:
+Verificação antivírus dos arquivos enviados pelo vendedor antes de ficarem disponíveis; pode estar desativada por configuração do ambiente.
+_Avoid_: Moderação de conteúdo, aprovação do produto.
+
 **Checkout do produto**:
 Fluxo compartilhável de identificação do comprador e pagamento de um produto específico.
 _Avoid_: Loja virtual, carrinho, pedido.
@@ -53,12 +73,16 @@ Edição do arquivo digital associada à oferta no momento em que o pedido é cr
 _Avoid_: Arquivo atual do produto, última versão.
 
 **Direito de download**:
-Direito do comprador de obter a versão digital adquirida durante o período contratado, sujeito à situação da compra.
-_Avoid_: Link de download, arquivo público, acesso vitalício.
+Direito do comprador de obter a versão digital adquirida enquanto a compra permanecer paga; um reembolso o encerra.
+_Avoid_: Arquivo público, acesso incondicional, link de checkout.
 
 **Link de acesso ao pedido**:
-Meio temporário para o comprador acessar as informações e entregas autorizadas de seu pedido.
-_Avoid_: Direito de download, link de checkout, link direto do arquivo.
+Meio para o comprador acessar as informações e entregas autorizadas de seu pedido: válido por 24 horas enquanto o pedido aguarda pagamento e permanente após a confirmação.
+_Avoid_: Direito de download, link de checkout.
+
+**Link de download direto**:
+Endereço permanente, enviado por e-mail na confirmação do pagamento, que entrega o pacote digital adquirido sem passar pela página do pedido; tem o mesmo valor de acesso que o link do pedido.
+_Avoid_: Link público do arquivo, link de checkout.
 
 **Envio físico**:
 Postagem declarada pelo vendedor, acompanhada de rastreio ou comprovante.
@@ -153,3 +177,11 @@ _Avoid_: Downgrade, confisco de saldo, exclusão da conta.
 **Pagamento simulado**:
 Resultado de teste que reproduz os estados de uma cobrança sem movimentar dinheiro.
 _Avoid_: Pagamento real, recebimento bancário, homologação do gateway.
+
+**Ambiente de demonstração**:
+Instalação em produção na qual os pagamentos simulados foram liberados por decisão explícita; cada tela e e-mail avisa que nenhum valor é cobrado.
+_Avoid_: Sandbox do provedor, ambiente de teste do Mercado Pago.
+
+**Notificação do provedor**:
+Aviso enviado pelo provedor de pagamento sobre a mudança de uma cobrança; a nostore registra o aviso, confere sua assinatura e consulta a cobrança antes de alterar o pedido.
+_Avoid_: Pagamento confirmado por si só, retorno do checkout.
