@@ -4,6 +4,7 @@ import { AppError } from './domain.ts';
 import { assertTransition, type PaymentStatus } from './gateway.ts';
 import { token } from './security.ts';
 import { downloadDeadline, issueAccess, paymentConfirmedMail, queueMail } from './commerce.ts';
+import { createShipmentForPaidOrder } from './shipping.ts';
 
 // Single place where an order changes payment state, whoever triggers it (simulator, card response,
 // webhook or a seller refund): locks the order, validates the transition, updates order and attempt,
@@ -25,6 +26,7 @@ export async function applyPaymentStatus(app: FastifyInstance, tx: Prisma.Transa
   const test = order.gateway === 'simulated';
   const facts = [{ label: 'Produto', value: order.productName }, { label: 'Pedido', value: order.id }];
   if (paid) {
+    await createShipmentForPaidOrder(tx, updated);
     // One e-mail with the confirmation and a permanent link; digital orders also get a direct download URL.
     const raw = token();
     const link = await issueAccess(tx, orderId, app.config, raw, true);

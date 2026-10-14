@@ -51,5 +51,11 @@
       "destination": "https://nostore.com.br/$1",
       "permanent": true
     }
+  ],
+  "crons": [
+    {
+      "path": "/api/v1/internal/shipments/sync",
+      "schedule": "0 9 * * *"
+    }
   ]
 }

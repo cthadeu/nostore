@@ -88,6 +88,26 @@ _Avoid_: Link público do arquivo, link de checkout.
 Postagem declarada pelo vendedor, acompanhada de rastreio ou comprovante.
 _Avoid_: Entrega confirmada, recebimento pelo comprador.
 
+**Frete calculado**:
+Opção de envio em que o comprador escolhe a transportadora e o prazo entre as cotações do Melhor Envio para o seu CEP e paga o frete no checkout, somado ao produto e sem taxa da nostore.
+_Avoid_: Frete incluso, envio manual, tarifa do gateway.
+
+**Envio manual**:
+Opção em que o vendedor arca com o envio, considera o custo no preço e registra transportadora e rastreio após postar.
+_Avoid_: Frete calculado, frete grátis como promessa ao comprador.
+
+**Conexão Melhor Envio**:
+Autorização por OAuth pela qual o vendedor vincula sua conta Melhor Envio à nostore, pré-requisito do frete calculado junto com o endereço de origem e as medidas da embalagem.
+_Avoid_: Conexão Mercado Pago, conta vendedora.
+
+**Etiqueta de envio**:
+Documento de postagem comprado pela nostore em nome do vendedor com o saldo da carteira Melhor Envio dele, gerado e impresso pela tela Pedidos.
+_Avoid_: Comprovante de postagem, rastreio como sinônimos.
+
+**Endereço de origem**:
+Endereço e telefone do vendedor usados como remetente nas cotações e etiquetas.
+_Avoid_: Endereço de entrega, conta bancária de recebimento.
+
 ### Venda e valores
 
 **Pedido**:

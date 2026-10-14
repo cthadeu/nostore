@@ -5,6 +5,8 @@ export interface Config {
   fileStorage: 'local' | 'blob';
   paymentGateway: 'disabled' | 'simulated' | 'mercadopago'; allowSimulatedPayments: boolean; adminEmails: string[];
   mercadoPago?: { clientId: string; clientSecret: string; webhookSecret?: string };
+  melhorEnvio?: { clientId: string; clientSecret: string; env: 'sandbox' | 'production'; userAgent: string };
+  cronSecret?: string;
   clamavHost?: string; clamavPort: number; fileScan: 'clamav' | 'off';
   mailDelivery: 'worker' | 'inline'; smtp: { host: string; port: number; user?: string; password?: string; from: string };
 }
@@ -21,6 +23,14 @@ export function getConfig(): Config {
   const mailDelivery = process.env.MAIL_DELIVERY ?? 'worker';
   if (mailDelivery !== 'worker' && mailDelivery !== 'inline') throw new Error('MAIL_DELIVERY deve ser worker ou inline.');
   const smtp = { host: process.env.SMTP_HOST ?? '127.0.0.1', port: Number(process.env.SMTP_PORT ?? 1025), user: process.env.SMTP_USER || undefined, password: process.env.SMTP_PASSWORD || undefined, from: process.env.MAIL_FROM ?? 'nostore <no-reply@nostore.local>' };
+  let melhorEnvio: Config['melhorEnvio'];
+  if (process.env.ME_CLIENT_ID || process.env.ME_CLIENT_SECRET) {
+    const clientId = process.env.ME_CLIENT_ID, clientSecret = process.env.ME_CLIENT_SECRET, env = process.env.ME_ENV ?? 'production';
+    if (!clientId || !clientSecret) throw new Error('ME_CLIENT_ID e ME_CLIENT_SECRET devem ser definidos juntos.');
+    if (env !== 'sandbox' && env !== 'production') throw new Error('ME_ENV deve ser sandbox ou production.');
+    const contact = (process.env.MAIL_FROM ?? '').match(/<([^>]+)>/)?.[1] ?? process.env.MAIL_FROM ?? 'contato@nostore.com.br';
+    melhorEnvio = { clientId, clientSecret, env, userAgent: process.env.ME_USER_AGENT ?? `nostore (${contact})` };
+  }
   const fileScan = process.env.FILE_SCAN ?? 'clamav';
   if (fileScan !== 'clamav' && fileScan !== 'off') throw new Error('FILE_SCAN deve ser clamav ou off.');
   const paymentGateway = process.env.PAYMENT_GATEWAY ?? 'disabled';
@@ -33,5 +43,5 @@ export function getConfig(): Config {
   }
   const allowSimulatedPayments = process.env.ALLOW_SIMULATED_PAYMENTS === 'true';
   if (production && paymentGateway === 'simulated' && !allowSimulatedPayments) throw new Error('Gateway simulado não é permitido em produção. Defina ALLOW_SIMULATED_PAYMENTS=true apenas em ambientes de demonstração.');
-  return { paymentGateway, allowSimulatedPayments, mercadoPago, fileScan, mailDelivery, smtp, adminEmails: (process.env.ADMIN_EMAILS ?? '').split(',').map(v => v.trim().toLowerCase()).filter(Boolean), clamavHost: process.env.CLAMAV_HOST, clamavPort: Number(process.env.CLAMAV_PORT ?? 3310), databaseUrl, encryptionKey, origin, production, port: Number(process.env.PORT ?? 3001), storageDir: resolve(process.env.STORAGE_DIR ?? '../../.local/assets'), fileStorage };
+  return { paymentGateway, allowSimulatedPayments, mercadoPago, melhorEnvio, cronSecret: process.env.CRON_SECRET || undefined, fileScan, mailDelivery, smtp, adminEmails: (process.env.ADMIN_EMAILS ?? '').split(',').map(v => v.trim().toLowerCase()).filter(Boolean), clamavHost: process.env.CLAMAV_HOST, clamavPort: Number(process.env.CLAMAV_PORT ?? 3310), databaseUrl, encryptionKey, origin, production, port: Number(process.env.PORT ?? 3001), storageDir: resolve(process.env.STORAGE_DIR ?? '../../.local/assets'), fileStorage };
 }

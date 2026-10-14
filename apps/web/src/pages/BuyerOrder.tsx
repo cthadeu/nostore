@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { FormEvent } from 'react';
 import useSWR from 'swr';
 import { Button } from '@heroui/react/button';
-import { api, money, orderLabels } from '../lib/api';
+import { api, money, orderLabels, shipmentLabels } from '../lib/api';
 import type { Order } from '../lib/api';
 import { Brand, Field, Notice, Pending, Submit } from '../components/ui';
 import { PixPanel } from '../components/PixPanel';
@@ -28,9 +28,10 @@ export default function BuyerOrder() {
   const simulated = !order || order.gateway === 'simulated';
   return <main className="narrow"><Brand/>{simulated ? <Notice message="Ambiente de teste. Nenhum pagamento real é processado."/> : null}
     {error ? <Notice error message={error.message}/> : accessToken && !order ? <Pending/> : null}
-    {order ? <><span className="pill">{orderLabels[order.status] ?? order.status}</span><h1>{order.productName}</h1><p className="quiet">Pedido <span className="break-text">{order.id}</span></p><dl className="amounts"><div><dt>Produto</dt><dd>{money(order.priceCents)}</dd></div><div><dt>Taxa</dt><dd>{money(order.feeCents)}</dd></div><div className="total"><dt>{simulated ? 'Total simulado' : 'Total'}</dt><dd>{money(order.totalCents)}</dd></div></dl>
+    {order ? <><span className="pill">{orderLabels[order.status] ?? order.status}</span><h1>{order.productName}</h1><p className="quiet">Pedido <span className="break-text">{order.id}</span></p><dl className="amounts"><div><dt>Produto</dt><dd>{money(order.priceCents)}</dd></div><div><dt>Taxa</dt><dd>{money(order.feeCents)}</dd></div>{order.shippingCents ? <div><dt>Frete{order.shipping?.service ? ` (${order.shipping.carrier} ${order.shipping.service})` : ''}</dt><dd>{money(order.shippingCents)}</dd></div> : null}<div className="total"><dt>{simulated ? 'Total simulado' : 'Total'}</dt><dd>{money(order.totalCents)}</dd></div></dl>
       {order.status === 'pending' ? (simulated ? <Notice message={`Aguardando aprovação do vendedor na tela Pedidos. ${order.method === 'pix' ? 'O Pix de teste não possui QR Code ou código pagável.' : 'Nenhum dado de cartão é necessário.'} Expira em ${new Date(order.expiresAt).toLocaleString('pt-BR')}.`}/> : order.pix ? <PixPanel order={order}/> : <Notice message={`Aguardando a confirmação do pagamento pelo Mercado Pago. Expira em ${new Date(order.expiresAt).toLocaleString('pt-BR')}.`}/>) : null}
       {order.downloadable ? <Button isPending={pending} onPress={download}>Baixar produto digital</Button> : order.status === 'paid' ? <Notice message={order.productType === 'physical' ? `Pagamento ${simulated ? 'de teste ' : ''}aprovado. O vendedor tem acesso ao endereço para organizar o envio.` : 'O período de download terminou.'}/> : null}
+      {order.productType === 'physical' && order.status === 'paid' ? <section className="shipment-panel"><h3>Entrega</h3>{order.shipment ? <><p><span className="pill">{shipmentLabels[order.shipment.status] ?? order.shipment.status}</span>{order.shipment.carrier ? ` · ${order.shipment.carrier}` : ''}</p>{order.shipment.trackingCode ? <p>Rastreio: <strong className="break-text">{order.shipment.trackingCode}</strong>{order.shipment.trackingUrl ? <> · <a href={order.shipment.trackingUrl} target="_blank" rel="noreferrer">acompanhar</a></> : null}</p> : <p className="quiet">O código de rastreio aparece aqui assim que o vendedor postar.</p>}</> : <p className="quiet">O vendedor está preparando o envio.</p>}{order.shipping?.deliveryDays ? <p className="quiet">Prazo estimado da transportadora: até {order.shipping.deliveryDays} dias úteis após a postagem.</p> : null}</section> : null}
       <Button variant="outline" onPress={() => mutate()}>Atualizar situação</Button>
     </> : null}
     {actionError ? <Notice error message={actionError}/> : null}{message ? <Notice message={message}/> : null}

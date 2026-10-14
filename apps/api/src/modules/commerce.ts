@@ -5,6 +5,8 @@ import { buyerStamp, stampPdf } from '../lib/pdf-stamp.ts';
 import { applyPaymentStatus } from '../lib/payments.ts';
 import { mapPaymentStatus, mpErrorCode } from '../lib/mercadopago.ts';
 import { sellerAccessToken } from '../lib/mp-account.ts';
+import { parcelOf, resolveQuote, sellerForShippingInclude, shipsWithMelhorEnvio } from '../lib/shipping.ts';
+import { sellerOrigin } from '../lib/me-account.ts';
 import type { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 import { Type } from '@sinclair/typebox';
 import { randomUUID } from 'node:crypto';
@@ -33,14 +35,14 @@ export async function commerceRoutes(server: FastifyInstance) {
       const base = { sellerId: request.identity!.sellerId, ...(productId ? { productId } : {}) };
       const where = { ...base, ...(status === 'expired' ? { status: 'pending', expiresAt: { lte: new Date() } } : status === 'pending' ? { status, expiresAt: { gt: new Date() } } : status ? { status } : {}) };
       const [items, total, sums] = await Promise.all([
-        app.db.order.findMany({ where, include: { payment: true }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], skip: (page - 1) * limit, take: limit }),
+        app.db.order.findMany({ where, include: { payment: true, shipment: true }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], skip: (page - 1) * limit, take: limit }),
         app.db.order.count({ where }),
         app.db.order.aggregate({ where: { ...base, status: 'paid' }, _count: true, _sum: { totalCents: true, feeCents: true, priceCents: true } }),
       ]);
       return { items: items.map(o => ({ ...publicOrder(o), buyerName: o.buyerName, buyerEmail: o.buyerEmail })), total, paidCount: sums._count, grossCents: sums._sum.totalCents ?? 0, feeCents: sums._sum.feeCents ?? 0, sellerCents: sums._sum.priceCents ?? 0 };
     });
     seller.get('/seller/orders/:id', { schema: { params: IdParams, response: { 200: Type.Intersect([OrderResponse, Type.Object({ buyerName: Type.String(), buyerEmail: Type.String(), address: Type.Union([Address, Type.Null()]) })]) } } }, async request => {
-      const order = await app.db.order.findFirst({ where: { id: request.params.id, sellerId: request.identity!.sellerId }, include: { payment: true } });
+      const order = await app.db.order.findFirst({ where: { id: request.params.id, sellerId: request.identity!.sellerId }, include: { payment: true, shipment: true } });
       if (!order) throw new AppError('NOT_FOUND', 'Pedido não encontrado.', 404);
       return { ...publicOrder(order), buyerName: order.buyerName, buyerEmail: order.buyerEmail, address: order.addressEncrypted ? JSON.parse(decrypt(order.addressEncrypted, app.config.encryptionKey)) : null };
     });
@@ -89,14 +91,15 @@ export async function commerceRoutes(server: FastifyInstance) {
     });
   });
 
-  const CheckoutResponse = Type.Object({ publicId: Type.String(), publicKey: Type.Union([Type.String(), Type.Null()]), version: Type.String(), name: Type.String(), description: Type.String(), type: Type.String(), sellerName: Type.String(), imageUrl: Type.String(), paymentMethods: Type.Array(Type.String()), priceCents: Type.Integer(), feeCents: Type.Integer(), totalCents: Type.Integer(), feePolicy: FeeResponse, gateway: Type.String(), shippingDays: Type.Union([Type.Integer(), Type.Null()]) });
+  const CheckoutResponse = Type.Object({ publicId: Type.String(), publicKey: Type.Union([Type.String(), Type.Null()]), shippingMode: Type.String(), version: Type.String(), name: Type.String(), description: Type.String(), type: Type.String(), sellerName: Type.String(), imageUrl: Type.String(), paymentMethods: Type.Array(Type.String()), priceCents: Type.Integer(), feeCents: Type.Integer(), totalCents: Type.Integer(), feePolicy: FeeResponse, gateway: Type.String(), shippingDays: Type.Union([Type.Integer(), Type.Null()]) });
   app.get('/checkout/:id', { schema: { params: IdParams, response: { 200: CheckoutResponse } } }, async request => {
     const gateway = gatewayFor(app.config);
     const [product, fee] = await Promise.all([
       app.db.product.findFirst({ where: { publicId: request.params.id, status: 'active', seller: { moderationStatus: 'active' } }, include: { seller: true } }), currentFee(app.db),
     ]);
+    if (product && shipsWithMelhorEnvio(product) && (!app.me || product.seller.shippingStatus !== 'connected' || !parcelOf(product) || !sellerOrigin(product.seller, app.config.encryptionKey))) throw new AppError('NOT_FOUND', 'Este produto não está disponível para compra.', 404);
     if (!product || (gateway.name === 'mercadopago' && (product.seller.gatewayStatus !== 'connected' || !product.seller.mpPublicKey))) throw new AppError('NOT_FOUND', 'Este produto não está disponível para compra.', 404);
-    return { publicId: product.publicId, publicKey: gateway.name === 'mercadopago' ? product.seller.mpPublicKey : null, version: product.updatedAt.toISOString(), name: product.name, description: product.description, type: product.type, sellerName: product.seller.displayName, imageUrl: `/api/v1/checkout/${product.publicId}/image`, paymentMethods: product.paymentMethods, ...calculateFee(product.priceCents, fee.basisPoints), feePolicy: { ...fee, createdAt: fee.createdAt.toISOString() }, gateway: gateway.name, shippingDays: product.shippingDays };
+    return { publicId: product.publicId, publicKey: gateway.name === 'mercadopago' ? product.seller.mpPublicKey : null, shippingMode: product.type === 'physical' ? product.shippingMode : 'none', version: product.updatedAt.toISOString(), name: product.name, description: product.description, type: product.type, sellerName: product.seller.displayName, imageUrl: `/api/v1/checkout/${product.publicId}/image`, paymentMethods: product.paymentMethods, ...calculateFee(product.priceCents, fee.basisPoints), feePolicy: { ...fee, createdAt: fee.createdAt.toISOString() }, gateway: gateway.name, shippingDays: product.shippingDays };
   });
   app.get('/checkout/:id/image', { schema: { params: IdParams } }, async (request, reply) => {
     const product = await app.db.product.findFirst({ where: { publicId: request.params.id, status: 'active', seller: { moderationStatus: 'active' } } });
@@ -124,6 +127,14 @@ export async function commerceRoutes(server: FastifyInstance) {
       await tx.$queryRaw`SELECT id FROM "Seller" WHERE id = ${candidate.sellerId}::uuid FOR UPDATE`;
       await tx.$queryRaw`SELECT pg_advisory_xact_lock(730001)::text`;
       const product = await tx.product.findUniqueOrThrow({ where: { id: candidate.id }, include: { seller: { include: { user: true } }, files: { orderBy: { position: 'asc' } } } });
+      // Freight: re-validate the chosen option against a fresh (or cached) quote; the buyer never sets the price.
+      let freight: { cents: number; serviceId: number | null; service: string | null; carrier: string | null; days: number | null } = { cents: 0, serviceId: null, service: null, carrier: null, days: null };
+      if (shipsWithMelhorEnvio(product)) {
+        if (!input.address || !input.shippingServiceId) throw new AppError('SHIPPING_REQUIRED', 'Escolha uma opção de frete.');
+        if (!app.me || product.seller.shippingStatus !== 'connected') throw new AppError('PRODUCT_UNAVAILABLE', 'Produto indisponível.', 409);
+        const quote = await resolveQuote(app, product, { ...product.seller, user: { email: product.seller.user.email, name: product.seller.user.name } }, input.address.postalCode, input.shippingServiceId);
+        freight = { cents: quote.priceCents, serviceId: quote.serviceId, service: quote.name, carrier: quote.carrier, days: quote.deliveryDays };
+      }
       if (product.status !== 'active' || product.seller.moderationStatus !== 'active' || !product.seller.user.emailVerifiedAt) throw new AppError('PRODUCT_UNAVAILABLE', 'Produto indisponível.', 409);
       const fee = await currentFee(tx);
       if (fee.id !== input.feePolicyId || product.updatedAt.toISOString() !== input.productVersion) throw new AppError('PRICE_CHANGED', 'As condições do produto mudaram. Atualize o checkout antes de continuar.', 409);
@@ -134,7 +145,8 @@ export async function commerceRoutes(server: FastifyInstance) {
       if (gateway.name === 'mercadopago' && input.method === 'card' && !input.card) throw new AppError('CARD_REQUIRED', 'Informe os dados do cartão.');
       if (product.type === 'digital' && (!product.files.length || await tx.asset.count({ where: { id: { in: product.files.map(f => f.assetId) }, sellerId: product.sellerId, status: 'approved', kind: 'digital' } }) !== product.files.length)) throw new AppError('FILE_UNAVAILABLE', 'Arquivo indisponível para venda.', 409);
       const id = randomUUID();
-      const amounts = calculateFee(product.priceCents, fee.basisPoints);
+      const base = calculateFee(product.priceCents, fee.basisPoints);
+      const amounts = { ...base, totalCents: base.totalCents + freight.cents };
       const order = await tx.order.create({ data: {
         id, sellerId: product.sellerId, productId: product.id, productName: product.name, productType: product.type,
         files: { create: product.type === 'digital' ? product.files.map(f => ({ assetId: f.assetId, position: f.position })) : [] },
@@ -142,6 +154,7 @@ export async function commerceRoutes(server: FastifyInstance) {
         buyerName: input.buyerName, buyerEmail: input.buyerEmail, buyerDocumentEncrypted: encrypt(input.buyerDocument, app.config.encryptionKey),
         addressEncrypted: product.type === 'physical' ? encrypt(JSON.stringify(input.address), app.config.encryptionKey) : null,
         ...amounts, feePolicyId: fee.id, feeBasisPoints: fee.basisPoints, gateway: gateway.name, checkoutKeyHash: keyHash, requestHash,
+        shippingCents: freight.cents, shippingMode: product.type === 'physical' ? product.shippingMode : 'manual', shippingServiceId: freight.serviceId, shippingServiceName: freight.service, shippingCarrier: freight.carrier, shippingDeliveryDays: freight.days,
         expiresAt: new Date(Date.now() + 30 * 60_000),
         payment: { create: { gateway: gateway.name, reference: `${gateway.name}-${id}`, status: 'pending', method: input.method } },
       }, include: { payment: true } });
@@ -198,7 +211,7 @@ export async function commerceRoutes(server: FastifyInstance) {
     if (raw) return authorizeOrder(app.db, raw);
     const session = cookie && /^[a-f0-9]{64}$/.test(cookie) ? await app.db.buyerSession.findUnique({ where: { tokenHash: hashToken(cookie) } }) : null;
     if (!session || session.expiresAt <= new Date()) throw new AppError('ACCESS_INVALID', 'Acesso expirado. Solicite outro link pelo e-mail da compra.', 401);
-    return app.db.order.findUniqueOrThrow({ where: { id: session.orderId }, include: { payment: true, files: true } });
+    return app.db.order.findUniqueOrThrow({ where: { id: session.orderId }, include: { payment: true, files: true, shipment: true } });
   }
   app.post('/buyer/order', { schema: { body: BuyerBody, response: { 200: OrderResponse } } }, async request => publicOrder(await buyerOrder(request.body.token, request.cookies.nostore_buyer)));
   app.post('/buyer/renew-access', { config: { rateLimit: { max: 5, timeWindow: '1 hour' } }, schema: { body: Type.Object({ orderId: Type.String({ format: 'uuid' }), email: Type.String({ format: 'email', maxLength: 254 }) }, { additionalProperties: false }), response: { 200: MessageResponse } } }, async request => {

@@ -16,7 +16,7 @@ export async function sellerRoutes(server: FastifyInstance) {
   app.addHook('onRequest', app.authenticate);
   app.get('/profile', async (request) => {
     const seller = await app.db.seller.findUniqueOrThrow({ where: { id: request.identity!.sellerId }, include: { user: true } });
-    return { id: seller.id, name: seller.user.name, email: seller.user.email, emailVerified: Boolean(seller.user.emailVerifiedAt), displayName: seller.displayName, personType: seller.personType, documentLast4: seller.documentLast4, plan: effectivePlan(seller), gatewayStatus: seller.gatewayStatus, gatewayAccount: seller.mpUserId, paymentGateway: app.config.paymentGateway, isAdmin: isAdmin(app.config, seller.user) };
+    return { id: seller.id, name: seller.user.name, email: seller.user.email, emailVerified: Boolean(seller.user.emailVerifiedAt), displayName: seller.displayName, personType: seller.personType, documentLast4: seller.documentLast4, plan: effectivePlan(seller), gatewayStatus: seller.gatewayStatus, gatewayAccount: seller.mpUserId, paymentGateway: app.config.paymentGateway, shippingStatus: seller.shippingStatus, shippingEnabled: Boolean(app.me), hasOrigin: Boolean(seller.originAddressEncrypted), isAdmin: isAdmin(app.config, seller.user) };
   });
   app.patch('/profile', { schema: { body: Type.Object({ displayName: Type.String({ minLength: 2, maxLength: 100 }), personType: Type.Union([Type.Literal('individual'), Type.Literal('business')]), document: Type.Optional(Type.String({ minLength: 11, maxLength: 14 })) }, { additionalProperties: false }), response: { 200: MessageResponse } } }, async (request) => {
     const { document, ...profile } = request.body;
@@ -98,6 +98,12 @@ export async function sellerRoutes(server: FastifyInstance) {
       const fileIds = product.files.map(f => f.assetId);
       if (product.type === 'digital' && (!fileIds.length || await tx.asset.count({ where: { id: { in: fileIds }, sellerId, kind: 'digital', status: 'approved' } }) !== fileIds.length)) throw new AppError('DIGITAL_FILE_REQUIRED', 'Adicione um arquivo digital aprovado.', 409);
       if (product.type === 'physical' && !product.shippingDays) throw new AppError('SHIPPING_REQUIRED', 'Informe o prazo de postagem.', 409);
+      if (product.type === 'physical' && product.shippingMode === 'melhorenvio') {
+        if (!app.me) throw new AppError('SHIPPING_UNAVAILABLE', 'O frete calculado não está habilitado neste ambiente. Use o envio manual.', 409);
+        if (seller.shippingStatus !== 'connected') throw new AppError('SHIPPING_NOT_CONNECTED', 'Conecte sua conta Melhor Envio em Configurações → Envio antes de publicar.', 409);
+        if (!seller.originAddressEncrypted || !seller.originPhone) throw new AppError('ORIGIN_REQUIRED', 'Cadastre o endereço de origem e o telefone em Configurações → Envio.', 409);
+        if (!product.weightGrams || !product.widthCm || !product.heightCm || !product.lengthCm) throw new AppError('PARCEL_REQUIRED', 'Informe peso e dimensões da embalagem para calcular o frete.', 409);
+      }
       await tx.product.update({ where: { id: product.id }, data: { status: 'active' } });
     // Publications serialize on the seller row; allow for remote-database latency under concurrency.
     }, { maxWait: 10_000, timeout: 20_000 });

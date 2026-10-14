@@ -207,3 +207,12 @@ summary { cursor: pointer; min-height: 44px; padding-block: 12px; }
 .pix-qr { justify-self: center; border: 1px solid var(--line); border-radius: 10px; padding: 8px; background: white; }
 .pix-panel textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; line-height: 1.5; word-break: break-all; }
 #cardPaymentBrick_container { margin-top: 10px; min-height: 120px; }
+
+/* Shipping: quote options at checkout, parcel fields and fulfilment panel */
+.shipping-options { display: grid; gap: 8px; margin: 6px 0 14px; }
+.shipping-option { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font-size: 13px; }
+.shipping-option strong { font-weight: 600; }
+.parcel-fields { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+.shipment-panel { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); display: grid; gap: 10px; }
+.shipment-panel h3 { font-size: 15px; }
+.shipment-panel .manual-post { display: grid; gap: 10px; max-width: 420px; }

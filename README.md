@@ -105,6 +105,10 @@ docker compose up -d --force-recreate api
 
 O menu **Plataforma** e o atalho em **Configurações → Taxa de serviço** permitem alterar o percentual com duas casas decimais. Só administradores podem editar a taxa global. Cada alteração cria uma versão, registra o administrador e preserva os pedidos existentes. Checkouts abertos com condições antigas pedem atualização antes de continuar.
 
+### Envio de produtos físicos
+
+Com `ME_CLIENT_ID`/`ME_CLIENT_SECRET` (aplicativo no painel do Melhor Envio; `ME_ENV=sandbox` para testes), o vendedor conecta a conta em **Configurações → Envio**, cadastra o endereço de origem e o telefone, e informa peso e medidas da embalagem no produto. No checkout o comprador digita o CEP, escolhe a transportadora e paga o frete junto com o produto; a taxa da nostore não incide sobre o frete, que vai integral ao vendedor. Após o pagamento, a tela **Pedidos** compra a etiqueta com o saldo da carteira Melhor Envio do vendedor, imprime, marca a postagem e acompanha o rastreio; o comprador recebe o e-mail "Produto enviado" com o código. Sem a integração, ou com "Envio manual" no produto, o vendedor posta por conta própria e registra transportadora e rastreio na mesma tela. Um cron diário (`CRON_SECRET`) atualiza os rastreios em andamento.
+
 ### Entrega e limites desta etapa
 
 - Arquivos permanecem privados no volume `assets_data` e passam pelo ClamAV do Compose; nunca são servidos como arquivos estáticos.

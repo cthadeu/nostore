@@ -5,11 +5,11 @@ import useSWR from 'swr';
 import { Card } from '@heroui/react/card';
 import { Button } from '@heroui/react/button';
 import { api, money } from '../lib/api';
-import type { Order } from '../lib/api';
+import type { Order, ShippingQuote } from '../lib/api';
 import { Brand, Field, Notice, Pending, Submit } from '../components/ui';
 import { PixPanel } from '../components/PixPanel';
 
-type Offer = { publicId: string; gateway: string; publicKey: string | null; version: string; name: string; description: string; sellerName: string; imageUrl: string; type: string; paymentMethods: string[]; priceCents: number; feeCents: number; totalCents: number; feePolicy: { id: string; basisPoints: number }; shippingDays: number | null };
+type Offer = { publicId: string; gateway: string; publicKey: string | null; shippingMode: string; version: string; name: string; description: string; sellerName: string; imageUrl: string; type: string; paymentMethods: string[]; priceCents: number; feeCents: number; totalCents: number; feePolicy: { id: string; basisPoints: number }; shippingDays: number | null };
 type CardData = { token: string; paymentMethodId: string; issuerId?: string };
 type CheckoutResult = { order: Order; accessUrl: string };
 const newToken = () => Array.from(crypto.getRandomValues(new Uint8Array(32)), n => n.toString(16).padStart(2, '0')).join('');
@@ -29,6 +29,22 @@ function CheckoutForm({ offer, refresh }: { offer: Offer; refresh: () => unknown
   const [method, setMethod] = useState(offer.paymentMethods[0] ?? 'pix');
   const [buyer, setBuyer] = useState<{ name: string; email: string; document: string; address?: Record<string, string> } | null>(null);
   const [pixOrder, setPixOrder] = useState<CheckoutResult | null>(null);
+  // Freight: quotes for the typed postal code; the chosen service id travels with the order.
+  const calculated = offer.type === 'physical' && offer.shippingMode === 'melhorenvio';
+  const [postalCode, setPostalCode] = useState('');
+  const [quotes, setQuotes] = useState<ShippingQuote[] | null>(null);
+  const [quoteError, setQuoteError] = useState('');
+  const [quoting, setQuoting] = useState(false);
+  const [serviceId, setServiceId] = useState<number | null>(null);
+  async function fetchQuotes(cep: string) {
+    const digits = cep.replace(/\D/g, '');
+    if (digits.length !== 8) { setQuotes(null); setServiceId(null); return; }
+    setQuoting(true); setQuoteError('');
+    try { const result = await api<{ quotes: ShippingQuote[] }>(`/checkout/${offer.publicId}/shipping-quotes`, { method: 'POST', body: JSON.stringify({ postalCode: digits }) }); setQuotes(result.quotes); setServiceId(result.quotes[0]?.serviceId ?? null); if (!result.quotes.length) setQuoteError('Nenhuma transportadora atende este CEP para este produto.'); }
+    catch (err) { setQuotes(null); setServiceId(null); setQuoteError((err as Error).message); } finally { setQuoting(false); }
+  }
+  const chosen = quotes?.find(q => q.serviceId === serviceId) ?? null;
+  const shippingCents = calculated ? (chosen?.priceCents ?? 0) : 0;
   const checkoutToken = useRef(newToken());
   const submitted = useRef<string | null>(null);
 
@@ -45,11 +61,12 @@ function CheckoutForm({ offer, refresh }: { offer: Offer; refresh: () => unknown
     return { name: String(form.get('name') ?? '').trim(), email: String(form.get('email') ?? '').trim(), document: String(form.get('document') ?? '').replace(/\D/g, ''), address };
   }
   function baseValues(b: NonNullable<typeof buyer>) {
-    return { productId: offer.publicId, productVersion: offer.version, feePolicyId: offer.feePolicy.id, buyerName: b.name, buyerEmail: b.email, buyerDocument: b.document, method, address: b.address, ...(simulated ? { acceptSimulation: true } : {}) };
+    return { productId: offer.publicId, productVersion: offer.version, feePolicyId: offer.feePolicy.id, buyerName: b.name, buyerEmail: b.email, buyerDocument: b.document, method, address: b.address, ...(calculated && serviceId ? { shippingServiceId: serviceId } : {}), ...(simulated ? { acceptSimulation: true } : {}) };
   }
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); if (pending) return;
     const b = readForm(new FormData(event.currentTarget));
+    if (calculated && !chosen) { setError('Informe o CEP e escolha uma opção de frete.'); return; }
     if (!simulated && method === 'card') { setBuyer(b); setError(''); return; }
     setPending(true); setError('');
     try {
@@ -82,14 +99,17 @@ function CheckoutForm({ offer, refresh }: { offer: Offer; refresh: () => unknown
     <section><img className="checkout-image" src={offer.imageUrl} alt={offer.name}/><p className="eyebrow">{offer.type === 'digital' ? 'PRODUTO DIGITAL' : 'PRODUTO FÍSICO'} · {offer.sellerName}</p><h1>{offer.name}</h1><p className="product-description">{offer.description}</p>{offer.type === 'physical' ? <p className="quiet">Frete por conta do vendedor. Postagem em até {offer.shippingDays} dias úteis.</p> : <p className="quiet">Download liberado logo após a confirmação do pagamento, por link permanente enviado ao seu e-mail.</p>}</section>
     <Card className="settings-card"><Card.Header><Card.Title>{simulated ? 'Finalizar compra de teste' : 'Finalizar compra'}</Card.Title></Card.Header><Card.Content>
       {simulated ? <Notice message="Pagamento simulado: nenhum valor será cobrado. Use dados de teste; não informe dados de cartão."/> : null}
-      <dl className="amounts"><div><dt>Produto</dt><dd>{money(offer.priceCents)}</dd></div><div><dt>Taxa de serviço ({offer.feePolicy.basisPoints / 100}%)</dt><dd>{money(offer.feeCents)}</dd></div><div className="total"><dt>Total</dt><dd>{money(offer.totalCents)}</dd></div></dl>
+      <dl className="amounts"><div><dt>Produto</dt><dd>{money(offer.priceCents)}</dd></div><div><dt>Taxa de serviço ({offer.feePolicy.basisPoints / 100}%)</dt><dd>{money(offer.feeCents)}</dd></div>{calculated ? <div><dt>Frete{chosen ? ` · ${chosen.carrier} ${chosen.name}` : ''}</dt><dd>{chosen ? money(chosen.priceCents) : 'a calcular'}</dd></div> : null}<div className="total"><dt>Total</dt><dd>{money(offer.totalCents + shippingCents)}</dd></div></dl>
       {pixOrder ? <><Notice message={`Pedido ${pixOrder.order.id} criado. Assim que o pagamento for confirmado, você será levado à página do pedido.`}/><PixPanel order={pixOrder.order}/></> : null}
       {!pixOrder && !(buyer && method === 'card' && !simulated) ? <form onSubmit={submit}><fieldset disabled={pending}><Field label="Nome completo"><input name="name" required minLength={2} maxLength={100} autoComplete="name" defaultValue={buyer?.name}/></Field><Field label="E-mail para receber o produto"><input name="email" type="email" required maxLength={254} autoComplete="email" defaultValue={buyer?.email}/></Field><Field label="CPF ou CNPJ" hint={simulated ? 'Para testar, use o CPF fictício 529.982.247-25.' : 'Exigido pelo Mercado Pago para identificar o pagamento.'}><input name="document" required inputMode="numeric" maxLength={18} defaultValue={buyer?.document}/></Field>
-        {offer.type === 'physical' ? <fieldset><legend>Endereço de entrega</legend>{[['postalCode', 'CEP'], ['street', 'Rua'], ['number', 'Número'], ['complement', 'Complemento'], ['district', 'Bairro'], ['city', 'Cidade'], ['state', 'UF']].map(([name, label]) => <Field key={name} label={label!}><input name={name} required={name !== 'complement'} maxLength={name === 'state' ? 2 : name === 'postalCode' ? 9 : 100} defaultValue={buyer?.address?.[name!]}/></Field>)}</fieldset> : null}
+        {offer.type === 'physical' ? <fieldset><legend>Endereço de entrega</legend>
+          <Field label="CEP" hint={calculated ? 'As opções de frete aparecem assim que o CEP for informado.' : undefined}><input name="postalCode" required inputMode="numeric" maxLength={9} value={postalCode || buyer?.address?.postalCode || ''} onChange={e => { setPostalCode(e.target.value); if (calculated) void fetchQuotes(e.target.value); }}/></Field>
+          {calculated ? <div className="shipping-options" aria-live="polite">{quoting ? <p className="quiet">Calculando frete…</p> : null}{quoteError ? <Notice error message={quoteError}/> : null}{quotes?.map(q => <label key={q.serviceId} className="check-row shipping-option"><input type="radio" name="shippingServiceId" value={q.serviceId} checked={serviceId === q.serviceId} onChange={() => setServiceId(q.serviceId)}/> <span><strong>{q.carrier} {q.name}</strong> · {money(q.priceCents)} · até {q.deliveryDays} dias úteis</span></label>)}</div> : null}
+          {[['street', 'Rua'], ['number', 'Número'], ['complement', 'Complemento'], ['district', 'Bairro'], ['city', 'Cidade'], ['state', 'UF']].map(([name, label]) => <Field key={name} label={label!}><input name={name} required={name !== 'complement'} maxLength={name === 'state' ? 2 : 100} defaultValue={buyer?.address?.[name!]}/></Field>)}</fieldset> : null}
         <Field label="Forma de pagamento"><select name="method" value={method} onChange={e => setMethod(e.target.value)}>{offer.paymentMethods.map(m => <option key={m} value={m}>{methodLabel(m)}</option>)}</select></Field>
         {simulated ? <label className="check-row"><input type="checkbox" required/> Entendo que esta é uma compra de teste, sem cobrança.</label> : null}
       </fieldset>{error ? <><Notice error message={error}/><Button variant="outline" onPress={() => refresh()}>Atualizar condições</Button></> : null}<Submit pending={pending}>{simulated ? 'Criar pedido de teste' : method === 'card' ? 'Continuar para o cartão' : 'Gerar Pix'}</Submit></form> : null}
-      {buyer && method === 'card' && !simulated && !pixOrder ? <CardBrick publicKey={offer.publicKey ?? ''} amountCents={offer.totalCents} email={buyer.email} pending={pending} error={error} onBack={() => { setBuyer(null); setError(''); }} onSubmit={payWithCard}/> : null}
+      {buyer && method === 'card' && !simulated && !pixOrder ? <CardBrick publicKey={offer.publicKey ?? ''} amountCents={offer.totalCents + shippingCents} email={buyer.email} pending={pending} error={error} onBack={() => { setBuyer(null); setError(''); }} onSubmit={payWithCard}/> : null}
     </Card.Content></Card>
   </main></>;
 }
