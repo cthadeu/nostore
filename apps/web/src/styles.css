@@ -216,3 +216,8 @@ summary { cursor: pointer; min-height: 44px; padding-block: 12px; }
 .shipment-panel { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); display: grid; gap: 10px; }
 .shipment-panel h3 { font-size: 15px; }
 .shipment-panel .manual-post { display: grid; gap: 10px; max-width: 420px; }
+
+/* Form feedback stays visible while the long product form scrolls */
+.editor-feedback { position: sticky; top: 12px; z-index: 5; }
+.editor-feedback:empty { display: none; }
+.editor-feedback .notice { box-shadow: 0 6px 20px rgba(94, 86, 90, .12); }
