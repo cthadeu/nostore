@@ -26,6 +26,21 @@ export async function commerceRoutes(server: FastifyInstance) {
       const fee = await currentFee(app.db);
       return { ...fee, createdAt: fee.createdAt.toISOString() };
     });
+    // Sales in a rolling window (default: today minus 15 days) plus the previous window for comparison.
+    const Window = Type.Object({ from: Type.String(), to: Type.String(), paidCount: Type.Integer(), totalCents: Type.Integer(), priceCents: Type.Integer(), feeCents: Type.Integer(), shippingCents: Type.Integer(), refundedCount: Type.Integer() });
+    seller.get('/seller/summary', { schema: { querystring: Type.Object({ days: Type.Integer({ minimum: 1, maximum: 365, default: 15 }) }), response: { 200: Type.Object({ days: Type.Integer(), current: Window, previous: Window }) } } }, async request => {
+      const sellerId = request.identity!.sellerId, days = request.query.days, span = days * 86_400_000;
+      const now = new Date(), from = new Date(now.getTime() - span), previousFrom = new Date(from.getTime() - span);
+      const window = async (start: Date, end: Date) => {
+        const [paid, refunded] = await Promise.all([
+          app.db.order.aggregate({ where: { sellerId, status: 'paid', paidAt: { gte: start, lt: end } }, _count: true, _sum: { totalCents: true, priceCents: true, feeCents: true, shippingCents: true } }),
+          app.db.order.count({ where: { sellerId, status: 'refunded', paidAt: { gte: start, lt: end } } }),
+        ]);
+        return { from: start.toISOString(), to: end.toISOString(), paidCount: paid._count, totalCents: paid._sum.totalCents ?? 0, priceCents: paid._sum.priceCents ?? 0, feeCents: paid._sum.feeCents ?? 0, shippingCents: paid._sum.shippingCents ?? 0, refundedCount: refunded };
+      };
+      const [current, previous] = await Promise.all([window(from, new Date(now.getTime() + 60_000)), window(previousFrom, from)]);
+      return { days, current, previous };
+    });
     seller.get('/seller/orders', { schema: { querystring: Type.Object({
       page: Type.Integer({ minimum: 1, default: 1 }), limit: Type.Integer({ minimum: 1, maximum: 50, default: 20 }),
       productId: Type.Optional(Type.String({ format: 'uuid' })),

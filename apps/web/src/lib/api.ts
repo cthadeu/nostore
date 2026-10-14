@@ -12,6 +12,8 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 export const money = (value: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value / 100);
 export interface Profile { id: string; name: string; email: string; displayName: string; personType: 'individual' | 'business'; documentLast4: string | null; emailVerified: boolean; plan: string; gatewayStatus: string; gatewayAccount: string | null; paymentGateway: string; shippingStatus: string; shippingEnabled: boolean; hasOrigin: boolean; isAdmin: boolean }
+export interface SalesWindow { from: string; to: string; paidCount: number; totalCents: number; priceCents: number; feeCents: number; shippingCents: number; refundedCount: number }
+export interface SalesSummary { days: number; current: SalesWindow; previous: SalesWindow }
 export interface Shipment { mode: string; status: string; carrier: string | null; service: string | null; trackingCode: string | null; trackingUrl: string | null; labelUrl: string | null; postedAt: string | null; deliveredAt: string | null; error: string | null }
 export interface ShippingQuote { serviceId: number; name: string; carrier: string; priceCents: number; deliveryDays: number }
 export const shipmentLabels: Record<string, string> = { pending: 'Aguardando etiqueta', purchased: 'Etiqueta comprada', generated: 'Etiqueta pronta', posted: 'Postado', delivered: 'Entregue', canceled: 'Etiqueta cancelada', failed: 'Falha no envio' };

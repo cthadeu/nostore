@@ -126,6 +126,9 @@ test('venda simulada: publicação, taxa, idempotência, isolamento, entrega e r
   assert.equal((await post('/buyer/order', {}, { ...base, cookie: `nostore_buyer=${buyerCookie.value}` })).json().id, order.id);
   const grant = await app.db.accessGrant.findUniqueOrThrow({ where: { tokenHash: hashToken(checkoutToken) } });
   assert.equal((await get('/seller/orders', admin)).json().paidCount, 1);
+  const summary = (await get('/seller/summary?days=15', admin)).json();
+  assert.equal(summary.days, 15); assert.equal(summary.current.paidCount, 1); assert.equal(summary.current.totalCents, 5240); assert.equal(summary.current.priceCents, 4990); assert.equal(summary.previous.paidCount, 0);
+  assert.equal((await get('/seller/summary?days=15', other)).json().current.paidCount, 0, 'resumo é por conta vendedora');
   const expiredTicket = (await post('/buyer/download-ticket', { token: checkoutToken })).json();
   await app.db.downloadTicket.updateMany({ where: { orderId: order.id }, data: { expiresAt: new Date(0) } });
   assert.equal((await app.inject({ method: 'GET', url: expiredTicket.url })).statusCode, 403);

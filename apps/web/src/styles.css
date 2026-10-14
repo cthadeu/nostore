@@ -221,3 +221,7 @@ summary { cursor: pointer; min-height: 44px; padding-block: 12px; }
 .editor-feedback { position: sticky; top: 12px; z-index: 5; }
 .editor-feedback:empty { display: none; }
 .editor-feedback .notice { box-shadow: 0 6px 20px rgba(94, 86, 90, .12); }
+
+/* Sales summary on the dashboard */
+.sales-stats { margin-top: 30px; }
+.sales-stats .commerce-stats { margin: 15px 0 0; }
