@@ -9,12 +9,12 @@ import { randomUUID } from 'node:crypto';
 import sharp from 'sharp';
 import { scanFile } from '../lib/scanner.ts';
 import { AppError } from '../lib/domain.ts';
+import { detectDigitalMimeType, DIGITAL_FILE_HINT, DIGITAL_HEAD_BYTES, DIGITAL_MEDIA_TYPES } from '../lib/file-types.ts';
 
 // Serverless request bodies are capped at 4.5 MB, so images go through the API while digital files
 // are uploaded by the browser straight to the object store with a presigned URL (start → presign →
 // complete). The local disk backend keeps the direct API upload.
 const IMAGE_LIMIT = 4 * 1024 * 1024, DIGITAL_LIMIT = 100 * 1024 * 1024;
-const DIGITAL_TYPES = ['application/pdf', 'application/zip', 'application/x-zip-compressed', 'application/epub+zip', 'application/octet-stream'];
 async function readHead(stream: Readable, bytes: number): Promise<Buffer> {
   const chunks: Buffer[] = []; let total = 0;
   for await (const chunk of stream) { chunks.push(chunk as Buffer); total += (chunk as Buffer).length; if (total >= bytes) break; }
@@ -40,7 +40,7 @@ export async function assetRoutes(server: FastifyInstance) {
       getSignedToken: async (pathname, clientPayload) => {
         const asset = clientPayload ? await app.db.asset.findFirst({ where: { id: clientPayload, sellerId, kind: 'digital', status: 'uploading' } }) : null;
         if (!asset || pathname !== app.storage.pathname(asset.storageKey)) throw new AppError('ASSET_INVALID', 'Envio não autorizado.', 403);
-        const token = await issueSignedToken({ pathname, operations: ['put'], maximumSizeInBytes: DIGITAL_LIMIT, allowedContentTypes: DIGITAL_TYPES, validUntil: Date.now() + 30 * 60_000 });
+        const token = await issueSignedToken({ pathname, operations: ['put'], maximumSizeInBytes: DIGITAL_LIMIT, allowedContentTypes: DIGITAL_MEDIA_TYPES, validUntil: Date.now() + 30 * 60_000 });
         return { token };
       },
     });
@@ -50,12 +50,11 @@ export async function assetRoutes(server: FastifyInstance) {
     if (!asset) throw new AppError('NOT_FOUND', 'Envio não encontrado.', 404);
     const info = await app.storage.stat(asset.storageKey);
     if (!info) throw new AppError('UPLOAD_INCOMPLETE', 'O arquivo ainda não chegou ao armazenamento. Tente novamente.', 409);
-    const head = await readHead(await app.storage.get(asset.storageKey), 8);
-    const pdf = head.subarray(0, 5).toString() === '%PDF-';
-    const zip = head.subarray(0, 4).equals(Buffer.from([0x50, 0x4b, 0x03, 0x04]));
-    if (!pdf && !zip) { await app.storage.delete(asset.storageKey); await app.db.asset.delete({ where: { id: asset.id } }); throw new AppError('INVALID_FILE', 'Envie um arquivo PDF, EPUB ou ZIP válido.'); }
+    const head = await readHead(await app.storage.get(asset.storageKey), DIGITAL_HEAD_BYTES);
+    const mimeType = detectDigitalMimeType(head, asset.originalName);
+    if (!mimeType) { await app.storage.delete(asset.storageKey); await app.db.asset.delete({ where: { id: asset.id } }); throw new AppError('INVALID_FILE', `Envie um arquivo ${DIGITAL_FILE_HINT} válido.`); }
     if (app.config.fileScan !== 'off') await scanFile(await app.storage.get(asset.storageKey), app.config);
-    const updated = await app.db.asset.update({ where: { id: asset.id }, data: { status: 'approved', size: info.size, mimeType: pdf ? 'application/pdf' : 'application/zip' } });
+    const updated = await app.db.asset.update({ where: { id: asset.id }, data: { status: 'approved', size: info.size, mimeType } });
     return { id: updated.id, name: updated.originalName, status: updated.status, size: updated.size };
   });
   app.post<{ Params: { kind: string } }>('/:kind', async (request, reply) => {
@@ -77,10 +76,9 @@ export async function assetRoutes(server: FastifyInstance) {
       catch { throw new AppError('INVALID_IMAGE', 'Envie uma imagem válida em JPG, PNG ou WebP.'); }
       mimeType = 'image/webp';
     } else {
-      const pdf = buffer.subarray(0, 5).toString() === '%PDF-';
-      const zip = buffer.subarray(0, 4).equals(Buffer.from([0x50, 0x4b, 0x03, 0x04]));
-      if (!pdf && !zip) throw new AppError('INVALID_FILE', 'Envie um arquivo PDF, EPUB ou ZIP válido.');
-      mimeType = pdf ? 'application/pdf' : 'application/zip';
+      const detected = detectDigitalMimeType(buffer.subarray(0, DIGITAL_HEAD_BYTES), file.filename);
+      if (!detected) throw new AppError('INVALID_FILE', `Envie um arquivo ${DIGITAL_FILE_HINT} válido.`);
+      mimeType = detected;
       await scanFile(buffer, app.config);
     }
     const key = randomUUID();
