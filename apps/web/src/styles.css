@@ -193,12 +193,25 @@ fieldset:disabled { opacity: .65; }
 summary { cursor: pointer; min-height: 44px; padding-block: 12px; }
 @media(max-width:760px) { .checkout-layout { grid-template-columns: 1fr; gap: 30px; padding: 30px 20px; } .commerce-stats { grid-template-columns: 1fr; } .order-actions { width: 100%; } }
 
-/* Bundle file list in the product editor */
-.file-list { list-style: none; margin: 0 0 1rem; padding: 0; display: grid; gap: .5rem; }
-.file-list li { display: flex; align-items: center; gap: .75rem; padding: .5rem .75rem; border: 1px solid #d9d7d5; border-radius: 9px; }
-.file-list li span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.file-list li small { opacity: .7; white-space: nowrap; }
-.file-list li button { background: none; border: 0; padding: 0; color: inherit; text-decoration: underline; cursor: pointer; font: inherit; }
+/* Bundle upload in the product editor: drop area, summary and file list */
+.bundle { display: grid; gap: 10px; margin-bottom: 18px; }
+.bundle-drop { display: grid; gap: 6px; justify-items: center; text-align: center; padding: 26px 20px; border: 1.5px dashed #c7c4c5; border-radius: 12px; background: var(--soft); cursor: pointer; transition: border-color .15s, background .15s; }
+.bundle-drop:hover, .bundle-drop:focus-visible { border-color: var(--ink); outline: none; }
+.bundle-drop.dragging { border-color: var(--ink); border-style: solid; background: #eef4ef; }
+.bundle-drop.disabled { cursor: not-allowed; opacity: .65; }
+.bundle-drop strong { font-size: 14px; font-weight: 550; }
+.bundle-drop small { font-size: 11px; line-height: 1.6; color: #827b7e; max-width: 46ch; }
+.bundle-drop input[type=file] { display: none; }
+.bundle-summary { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; font-size: 12px; }
+.bundle-warning { font-size: 12px; color: #8b3030; }
+.bundle-progress { font-size: 12px; color: #827b7e; }
+.file-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.file-list li { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border: 1px solid #d9d7d5; border-radius: 9px; font-size: 13px; }
+.file-index { flex: none; width: 22px; height: 22px; display: grid; place-items: center; border-radius: 50%; background: var(--line); font-size: 10px; }
+.file-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-list li small { opacity: .7; white-space: nowrap; font-size: 11px; }
+.file-list li button { background: none; border: 0; padding: 0; color: inherit; text-decoration: underline; cursor: pointer; font: inherit; font-size: 12px; }
+.file-list li button:disabled { opacity: .5; cursor: not-allowed; }
 
 /* Pix payment panel (checkout and buyer order page) */
 .pix-panel { margin-top: 20px; padding: 22px; border: 1px solid var(--line); border-radius: 14px; display: grid; gap: 14px; }

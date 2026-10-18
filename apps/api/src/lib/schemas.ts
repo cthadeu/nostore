@@ -8,7 +8,7 @@ export const ProductInput = Type.Object({
   type: Type.Union([Type.Literal('digital'), Type.Literal('physical')]),
   paymentMethods: Type.Array(Type.Union([Type.Literal('pix'), Type.Literal('card')]), { minItems: 1, maxItems: 2, uniqueItems: true }),
   imageAssetId: Type.Optional(Type.Union([Type.String({ format: 'uuid' }), Type.Null()])),
-  digitalAssetIds: Type.Optional(Type.Array(Type.String({ format: 'uuid' }), { maxItems: 20 })),
+  digitalAssetIds: Type.Optional(Type.Array(Type.String({ format: 'uuid' }), { maxItems: 40 })),
   stampBuyer: Type.Optional(Type.Boolean()),
   shippingDays: Type.Optional(Type.Union([Type.Integer({ minimum: 1, maximum: 90 }), Type.Null()])),
   shippingMode: Type.Optional(Type.Union([Type.Literal('manual'), Type.Literal('melhorenvio')])),
