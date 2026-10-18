@@ -32,7 +32,6 @@ export function SellerSidebar({ profile, total, activeCount }: { profile: Profil
       <Link className={pathname === '/configuracoes' ? 'nav-active' : undefined} to="/configuracoes" aria-current={pathname === '/configuracoes' ? 'page' : undefined}><span aria-hidden="true">⚙</span> Configurações</Link>
     </nav>
     <div className="plan-card"><span className="eyebrow">ESPAÇO PARA CRESCER</span><h3>Comece pequeno.<br/>Pense ilimitado.</h3><p>{pro ? 'Produtos ativos ilimitados no plano Pro.' : 'Até 5 produtos ativos no plano Gratuito.'}</p>{!pro && activeCount !== undefined ? <><div className="plan-meter"><span style={{ width: `${Math.min(activeCount / 5 * 100, 100)}%` }}/></div><small>{activeCount} de 5 ativos</small></> : null}</div>
-    {error ? <Notice message={error} error/> : null}
     <div className="user-menu"><div className="avatar">{profile.name.charAt(0).toUpperCase()}</div><div><strong>{profile.name}</strong><small>Conta {pro ? 'Pro' : 'Gratuita'}</small></div><Button variant="ghost" isDisabled={pending} onPress={logout} aria-label="Sair da conta">↪</Button></div>
   </aside>;
 }

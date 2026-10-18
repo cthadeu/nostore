@@ -233,10 +233,18 @@ summary { cursor: pointer; min-height: 44px; padding-block: 12px; }
 .shipment-panel h3 { font-size: 15px; }
 .shipment-panel .manual-post { display: grid; gap: 10px; max-width: 420px; }
 
-/* Form feedback stays visible while the long product form scrolls */
-.editor-feedback { position: sticky; top: 12px; z-index: 5; }
-.editor-feedback:empty { display: none; }
-.editor-feedback .notice { box-shadow: 0 6px 20px rgba(94, 86, 90, .12); }
+/* Toasts: transient feedback for the action the person just took */
+.toast-stack { position: fixed; z-index: 50; right: 18px; bottom: 18px; display: grid; gap: 10px; width: min(380px, calc(100vw - 36px)); pointer-events: none; }
+.toast-card { pointer-events: auto; display: flex; align-items: flex-start; gap: 11px; padding: 14px 15px; border: 1px solid #d6e3d9; border-radius: 12px; background: #f0f6f2; box-shadow: 0 10px 30px rgba(94, 86, 90, .16); animation: toast-in .18s ease-out; }
+.toast-card p { font-size: 13px; line-height: 1.55; flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.toast-card-icon { flex: none; width: 20px; height: 20px; display: grid; place-items: center; border-radius: 50%; background: var(--green); color: var(--ink); font-size: 11px; font-weight: 700; }
+.toast-card button { flex: none; background: none; border: 0; padding: 0 2px; color: inherit; font-size: 18px; line-height: 1; cursor: pointer; opacity: .6; }
+.toast-card button:hover { opacity: 1; }
+.toast-card--error { background: #fff5f3; border-color: #f0d2ce; color: #8b3030; }
+.toast-card--error .toast-card-icon { background: #f3c9c3; color: #8b3030; }
+@keyframes toast-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .toast-card { animation: none; } }
+@media (max-width: 600px) { .toast-stack { right: 12px; left: 12px; bottom: 12px; width: auto; } }
 
 /* Sales summary on the dashboard */
 .sales-stats { margin-top: 30px; }

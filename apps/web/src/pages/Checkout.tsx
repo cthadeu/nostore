@@ -7,6 +7,7 @@ import { Button } from '@heroui/react/button';
 import { api, money } from '../lib/api';
 import type { Order, ShippingQuote } from '../lib/api';
 import { Brand, Field, Notice, Pending, Submit } from '../components/ui';
+import { useToast } from '../components/Toast';
 import { PixPanel } from '../components/PixPanel';
 
 type Offer = { publicId: string; gateway: string; publicKey: string | null; shippingMode: string; version: string; name: string; description: string; sellerName: string; imageUrl: string; type: string; paymentMethods: string[]; priceCents: number; feeCents: number; totalCents: number; feePolicy: { id: string; basisPoints: number }; shippingDays: number | null };
@@ -23,9 +24,10 @@ export default function Checkout() {
 }
 
 function CheckoutForm({ offer, refresh }: { offer: Offer; refresh: () => unknown }) {
+  const toast = useToast();
   const simulated = offer.gateway === 'simulated';
   const [pending, setPending] = useState(false);
-  const [error, setError] = useState('');
+  const [failed, setFailed] = useState(false);
   const [method, setMethod] = useState(offer.paymentMethods[0] ?? 'pix');
   const [buyer, setBuyer] = useState<{ name: string; email: string; document: string; address?: Record<string, string> } | null>(null);
   const [pixOrder, setPixOrder] = useState<CheckoutResult | null>(null);
@@ -66,20 +68,20 @@ function CheckoutForm({ offer, refresh }: { offer: Offer; refresh: () => unknown
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); if (pending) return;
     const b = readForm(new FormData(event.currentTarget));
-    if (calculated && !chosen) { setError('Informe o CEP e escolha uma opção de frete.'); return; }
-    if (!simulated && method === 'card') { setBuyer(b); setError(''); return; }
-    setPending(true); setError('');
+    if (calculated && !chosen) { toast.error('Informe o CEP e escolha uma opção de frete.'); return; }
+    if (!simulated && method === 'card') { setBuyer(b); setFailed(false); return; }
+    setPending(true); setFailed(false);
     try {
       const result = await createOrder(baseValues(b));
       if (!simulated && method === 'pix' && result.order.pix) { setPixOrder(result); setBuyer(b); setPending(false); return; }
       window.location.assign(result.accessUrl);
-    } catch (err) { setError((err as Error).message); setPending(false); }
+    } catch (err) { toast.error((err as Error).message); setFailed(true); setPending(false); }
   }
   async function payWithCard(card: CardData) {
     if (!buyer || pending) return;
-    setPending(true); setError('');
+    setPending(true); setFailed(false);
     try { const result = await createOrder(baseValues(buyer), card); window.location.assign(result.accessUrl); }
-    catch (err) { setError((err as Error).message); setPending(false); }
+    catch (err) { toast.error((err as Error).message); setFailed(true); setPending(false); }
   }
   // Pix: poll the order with the checkout token until the payment is confirmed, then open the order page.
   useEffect(() => {
@@ -108,8 +110,8 @@ function CheckoutForm({ offer, refresh }: { offer: Offer; refresh: () => unknown
           {[['street', 'Rua'], ['number', 'Número'], ['complement', 'Complemento'], ['district', 'Bairro'], ['city', 'Cidade'], ['state', 'UF']].map(([name, label]) => <Field key={name} label={label!}><input name={name} required={name !== 'complement'} maxLength={name === 'state' ? 2 : 100} defaultValue={buyer?.address?.[name!]}/></Field>)}</fieldset> : null}
         <Field label="Forma de pagamento"><select name="method" value={method} onChange={e => setMethod(e.target.value)}>{offer.paymentMethods.map(m => <option key={m} value={m}>{methodLabel(m)}</option>)}</select></Field>
         {simulated ? <label className="check-row"><input type="checkbox" required/> Entendo que esta é uma compra de teste, sem cobrança.</label> : null}
-      </fieldset>{error ? <><Notice error message={error}/><Button variant="outline" onPress={() => refresh()}>Atualizar condições</Button></> : null}<Submit pending={pending}>{simulated ? 'Criar pedido de teste' : method === 'card' ? 'Continuar para o cartão' : 'Gerar Pix'}</Submit></form> : null}
-      {buyer && method === 'card' && !simulated && !pixOrder ? <CardBrick publicKey={offer.publicKey ?? ''} amountCents={offer.totalCents + shippingCents} email={buyer.email} pending={pending} error={error} onBack={() => { setBuyer(null); setError(''); }} onSubmit={payWithCard}/> : null}
+      </fieldset>{failed ? <Button variant="outline" onPress={() => { setFailed(false); refresh(); }}>Atualizar condições</Button> : null}<Submit pending={pending}>{simulated ? 'Criar pedido de teste' : method === 'card' ? 'Continuar para o cartão' : 'Gerar Pix'}</Submit></form> : null}
+      {buyer && method === 'card' && !simulated && !pixOrder ? <CardBrick publicKey={offer.publicKey ?? ''} amountCents={offer.totalCents + shippingCents} email={buyer.email} pending={pending} onBack={() => { setBuyer(null); setFailed(false); }} onSubmit={payWithCard}/> : null}
     </Card.Content></Card>
   </main></>;
 }
@@ -122,8 +124,8 @@ function loadSdk() {
   return sdkPromise;
 }
 // Card data never touches our servers: the Brick tokenizes it with the seller's public key.
-function CardBrick({ publicKey, amountCents, email, pending, error, onBack, onSubmit }: { publicKey: string; amountCents: number; email: string; pending: boolean; error: string; onBack: () => void; onSubmit: (card: CardData) => Promise<void> }) {
-  const [loadError, setLoadError] = useState('');
+function CardBrick({ publicKey, amountCents, email, pending, onBack, onSubmit }: { publicKey: string; amountCents: number; email: string; pending: boolean; onBack: () => void; onSubmit: (card: CardData) => Promise<void> }) {
+  const toast = useToast();
   const submitRef = useRef(onSubmit); submitRef.current = onSubmit;
   useEffect(() => {
     let controller: { unmount(): void } | null = null; let cancelled = false;
@@ -135,17 +137,17 @@ function CardBrick({ publicKey, amountCents, email, pending, error, onBack, onSu
         customization: { paymentMethods: { maxInstallments: 1 }, visual: { style: { theme: 'default' } } },
         callbacks: {
           onReady: () => {},
-          onError: (e: { message?: string }) => setLoadError(e?.message ?? 'Erro no formulário de cartão.'),
+          onError: (e: { message?: string }) => toast.error(e?.message ?? 'Erro no formulário de cartão.'),
           onSubmit: (formData: { token: string; payment_method_id: string; issuer_id?: string | number }) => submitRef.current({ token: formData.token, paymentMethodId: formData.payment_method_id, issuerId: formData.issuer_id !== undefined ? String(formData.issuer_id) : undefined }),
         },
       });
-    }).catch(err => setLoadError((err as Error).message));
+    }).catch(err => toast.error((err as Error).message));
     return () => { cancelled = true; controller?.unmount(); };
   }, [publicKey, amountCents, email]);
   return <div>
     <Notice message="Pagamento à vista no cartão de crédito, processado pelo Mercado Pago. Seus dados de cartão não passam pela nostore."/>
     <div id="cardPaymentBrick_container"/>
-    {loadError ? <Notice error message={loadError}/> : null}{error ? <Notice error message={error}/> : null}{pending ? <Notice message="Processando pagamento…"/> : null}
+    {pending ? <Notice message="Processando pagamento…"/> : null}
     <Button variant="outline" onPress={onBack} isDisabled={pending}>Voltar e revisar dados</Button>
   </div>;
 }

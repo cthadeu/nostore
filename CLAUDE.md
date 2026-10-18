@@ -33,6 +33,8 @@ Plataforma de venda por checkout individual: o vendedor cadastra um produto (fí
 - Migrações em produção são aplicadas manualmente com `npm run db:migrate` apontando para o banco de produção: antes do push quando só adicionam, logo após o push quando removem colunas usadas pelo código antigo.
 - Logs: `npx vercel logs --deployment <host>`; variáveis: `npx vercel env add|rm <NOME> production` (o Claude não envia segredos: passe os comandos para a pessoa executar).
 
+- Feedback na interface: o retorno de uma ação (sucesso ou erro) vai para um toast via `useToast()` (`components/Toast.tsx`, provedor em `main.tsx`). `Notice` fica para estados duradouros: página que não carregou, aviso de ambiente, falha registrada de um envio. A biblioteca de componentes já usa a classe `.toast`, por isso as nossas são `.toast-stack` e `.toast-card`.
+
 ## Convenções
 
 - Textos de interface, e-mails e mensagens de erro em português, seguindo o glossário; código e commits em inglês.

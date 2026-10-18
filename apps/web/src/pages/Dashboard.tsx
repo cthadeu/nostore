@@ -6,6 +6,7 @@ import { Card } from '@heroui/react/card';
 import { api, money, ApiError } from '../lib/api';
 import type { Profile, Product, SalesSummary } from '../lib/api';
 import { Brand, Notice, Pending } from '../components/ui';
+import { useToast } from '../components/Toast';
 import { SellerSidebar } from '../components/SellerSidebar';
 
 // Sales of the last 15 days against the 15 days before: count, amount paid and the seller's share.
@@ -26,14 +27,13 @@ export default function Dashboard() {
   const { data: products, error: productsError } = useSWR<{ items: Product[]; total: number; activeCount: number }>(profile ? `/seller/products?page=${page}&limit=12` : null);
   const { data: sales } = useSWR<SalesSummary>(profile ? '/seller/summary?days=15' : null, { refreshInterval: 60000 });
   const { mutate } = useSWRConfig();
-  const [message, setMessage] = useState('');
+  const toast = useToast();
   const [busy, setBusy] = useState(false);
-  async function verify() { setBusy(true); try { const result = await api<{message: string}>('/auth/resend-verification', { method: 'POST' }); setMessage(result.message); } catch (err) { setMessage((err as Error).message); } finally { setBusy(false); } }
+  async function verify() { setBusy(true); try { const result = await api<{ message: string }>('/auth/resend-verification', { method: 'POST' }); toast.success(result.message); } catch (err) { toast.error((err as Error).message); } finally { setBusy(false); } }
   if (error instanceof ApiError && error.status === 401) return <Navigate to="/entrar" replace/>;
   if (error) return <main className="narrow"><Notice error message={error.message}/><Button onPress={() => mutate('/seller/profile')}>Tentar novamente</Button></main>;
   if (!profile) return <Pending/>;
   return <div className="workspace"><SellerSidebar profile={profile} total={products?.total} activeCount={products?.activeCount}/><main className="main-workspace" id="overview"><header className="topbar"><span>Seu espaço criativo</span><span className="pill">● Plano {profile.plan === 'pro' ? 'Pro' : 'Gratuito'}</span></header><section className="page-intro"><div><span className="eyebrow">CADA IDEIA TEM UM COMEÇO</span><h1>Olá, {profile.name.split(' ')[0]} <span className="hello-dot">✳</span></h1><p>Vamos dar vida ao seu próximo produto?</p></div><Link className="button button--primary" to="/produtos/novo">+ Novo produto</Link></section>
-    {message ? <Notice message={message}/> : null}
     {!profile.emailVerified ? <div className="verification"><span><strong>Falta só confirmar seu e-mail.</strong><br/>Enviamos um link para {profile.email}.</span><Button variant="outline" isDisabled={busy} onPress={verify}>Reenviar e-mail</Button></div> : null}
     <div className="stats-grid"><Card className="stat"><Card.Header><span className="stat-label">Produtos cadastrados <span>▦</span></span></Card.Header><Card.Content><strong>{products?.total ?? '—'}</strong><small>Suas ideias tomando forma</small></Card.Content></Card><Card className="stat"><Card.Header><span className="stat-label">Produtos ativos <span>↗</span></span></Card.Header><Card.Content><strong>{products?.activeCount ?? '—'}<em>{profile.plan === 'pro' ? ' / ∞' : ' / 5'}</em></strong><small>Disponíveis no seu plano</small></Card.Content></Card><Card className="stat soft"><Card.Header><span className="stat-label">Seu próximo passo <span>✧</span></span></Card.Header><Card.Content><strong className="stat-text">Teste sua primeira venda</strong><small><Link to="/pedidos">Acompanhar pedidos e pagamentos →</Link></small></Card.Content></Card></div>
     <SalesStats sales={sales}/>

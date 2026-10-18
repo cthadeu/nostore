@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import { Link, Navigate } from 'react-router';
 import useSWR from 'swr';
@@ -8,6 +8,7 @@ import { api, ApiError } from '../lib/api';
 import type { Profile } from '../lib/api';
 import { SellerSidebar } from '../components/SellerSidebar';
 import { Field, Notice, Pending, Submit } from '../components/ui';
+import { useToast } from '../components/Toast';
 
 const gatewayLabels: Record<string, string> = { not_connected: 'Não conectado', pending: 'Em análise', connected: 'Conectado', active: 'Conectado', restricted: 'Recebimento restrito', revoked: 'Conexão revogada' };
 const gatewayMessages: Record<string, string> = { connected: 'Conta Mercado Pago conectada. Seus produtos já podem ser publicados.', denied: 'A autorização foi cancelada no Mercado Pago.', error: 'Não foi possível concluir a conexão com o Mercado Pago. Tente novamente.' };
@@ -18,24 +19,28 @@ type Origin = { phone: string | null; address: { postalCode: string; street: str
 function ShippingCard({ profile, refresh }: { profile: Profile; refresh: () => Promise<void> }) {
   const { data: origin, mutate: reloadOrigin } = useSWR<Origin>(profile.shippingEnabled ? '/seller/shipping/origin' : null);
   const [pending, setPending] = useState(false);
-  const [message, setMessage] = useState(() => { const result = new URLSearchParams(window.location.search).get('shipping'); if (result) window.history.replaceState(null, '', window.location.pathname + window.location.hash); return result ? shippingMessages[result] ?? '' : ''; });
-  const [error, setError] = useState('');
+  const toast = useToast();
   const connected = profile.shippingStatus === 'connected';
-  async function connect() { setPending(true); setError(''); try { const { url } = await api<{ url: string }>('/seller/shipping/connect'); window.location.assign(url); } catch (err) { setError((err as Error).message); setPending(false); } }
-  async function disconnect() { setPending(true); setError(''); try { const result = await api<{ message: string }>('/seller/shipping/disconnect', { method: 'POST' }); await refresh(); setMessage(result.message); } catch (err) { setError((err as Error).message); } finally { setPending(false); } }
+  useEffect(() => {
+    const result = new URLSearchParams(window.location.search).get('shipping');
+    if (!result) return;
+    window.history.replaceState(null, '', window.location.pathname + window.location.hash);
+    if (shippingMessages[result]) result === 'connected' ? toast.success(shippingMessages[result]) : toast.error(shippingMessages[result]);
+  }, [toast]);
+  async function connect() { setPending(true); try { const { url } = await api<{ url: string }>('/seller/shipping/connect'); window.location.assign(url); } catch (err) { toast.error((err as Error).message); setPending(false); } }
+  async function disconnect() { setPending(true); try { const result = await api<{ message: string }>('/seller/shipping/disconnect', { method: 'POST' }); await refresh(); toast.success(result.message); } catch (err) { toast.error((err as Error).message); } finally { setPending(false); } }
   async function saveOrigin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); if (pending) return;
     const form = new FormData(event.currentTarget); const read = (k: string) => String(form.get(k) ?? '').trim();
-    setPending(true); setError(''); setMessage('');
+    setPending(true);
     try {
       const result = await api<{ message: string }>('/seller/shipping/origin', { method: 'PUT', body: JSON.stringify({ phone: read('phone').replace(/\D/g, ''), address: { postalCode: read('postalCode').replace(/\D/g, ''), street: read('street'), number: read('number'), complement: read('complement') || undefined, district: read('district'), city: read('city'), state: read('state').toUpperCase() } }) });
-      await Promise.all([reloadOrigin(), refresh()]); setMessage(result.message);
-    } catch (err) { setError((err as Error).message); } finally { setPending(false); }
+      await Promise.all([reloadOrigin(), refresh()]); toast.success(result.message);
+    } catch (err) { toast.error((err as Error).message); } finally { setPending(false); }
   }
   if (!profile.shippingEnabled) return <Card className="settings-card" id="envio"><Card.Header><Card.Title>Envio</Card.Title><Card.Description>Produtos físicos</Card.Description></Card.Header><Card.Content><p className="settings-copy">O frete calculado pelo Melhor Envio não está habilitado neste ambiente. Produtos físicos usam envio manual: você posta e informa o rastreio na tela Pedidos.</p></Card.Content></Card>;
   return <Card className="settings-card" id="envio"><Card.Header><Card.Title>Envio</Card.Title><Card.Description>Melhor Envio</Card.Description></Card.Header><Card.Content>
     <span className="pill">{connected ? 'Conectado' : 'Não conectado'}</span>
-    {message ? <Notice message={message}/> : null}{error ? <Notice error message={error}/> : null}
     <p className="settings-copy">{connected ? 'O comprador escolhe a transportadora no checkout e paga o frete. A etiqueta é comprada com o saldo da sua carteira Melhor Envio, na tela Pedidos.' : 'Conecte sua conta Melhor Envio para oferecer frete calculado e etiquetas nos produtos físicos. Sem conexão, o envio é manual.'}</p>
     {connected ? <Button variant="outline" isPending={pending} onPress={disconnect}>Desconectar</Button> : <Button isPending={pending} onPress={connect}>Conectar Melhor Envio</Button>}
     <form className="editor-form" onSubmit={saveOrigin} key={origin ? 'loaded' : 'empty'}><fieldset disabled={pending}><legend>Endereço de origem (remetente das etiquetas)</legend>
@@ -49,14 +54,19 @@ function ShippingCard({ profile, refresh }: { profile: Profile; refresh: () => P
 // the API callback stores the credentials and brings the seller back here with ?gateway=<result>.
 function GatewayCard({ profile, refresh }: { profile: Profile; refresh: () => Promise<void> }) {
   const [pending, setPending] = useState(false);
-  const [message, setMessage] = useState(() => { const result = new URLSearchParams(window.location.search).get('gateway'); if (result) window.history.replaceState(null, '', window.location.pathname + window.location.hash); return result ? gatewayMessages[result] ?? '' : ''; });
+  const toast = useToast();
   const mercadoPago = profile.paymentGateway === 'mercadopago';
   const connected = profile.gatewayStatus === 'connected';
-  async function connect() { setPending(true); setMessage(''); try { const { url } = await api<{ url: string }>('/seller/gateway/connect'); window.location.assign(url); } catch (err) { setMessage((err as Error).message); setPending(false); } }
-  async function disconnect() { setPending(true); setMessage(''); try { const result = await api<{ message: string }>('/seller/gateway/disconnect', { method: 'POST' }); await refresh(); setMessage(result.message); } catch (err) { setMessage((err as Error).message); } finally { setPending(false); } }
+  useEffect(() => {
+    const result = new URLSearchParams(window.location.search).get('gateway');
+    if (!result) return;
+    window.history.replaceState(null, '', window.location.pathname + window.location.hash);
+    if (gatewayMessages[result]) result === 'connected' ? toast.success(gatewayMessages[result]) : toast.error(gatewayMessages[result]);
+  }, [toast]);
+  async function connect() { setPending(true); try { const { url } = await api<{ url: string }>('/seller/gateway/connect'); window.location.assign(url); } catch (err) { toast.error((err as Error).message); setPending(false); } }
+  async function disconnect() { setPending(true); try { const result = await api<{ message: string }>('/seller/gateway/disconnect', { method: 'POST' }); await refresh(); toast.success(result.message); } catch (err) { toast.error((err as Error).message); } finally { setPending(false); } }
   return <Card className="settings-card" id="recebimento"><Card.Header><Card.Title>Recebimento</Card.Title><Card.Description>{mercadoPago ? 'Mercado Pago' : 'Pagamentos simulados'}</Card.Description></Card.Header><Card.Content>
     <span className="pill">{gatewayLabels[profile.gatewayStatus] ?? 'Situação indisponível'}</span>
-    {message ? <Notice message={message}/> : null}
     {mercadoPago ? <>
       <p className="settings-copy">{connected ? `Conta Mercado Pago ${profile.gatewayAccount ?? ''} conectada. As vendas caem direto nela; a taxa de serviço da nostore é descontada automaticamente em cada pagamento.` : 'Conecte sua conta Mercado Pago para receber pelos seus checkouts. Você será levado ao Mercado Pago para autorizar a nostore e voltará para cá em seguida.'}</p>
       {connected ? <Button variant="outline" isPending={pending} onPress={disconnect}>Desconectar</Button> : <Button isPending={pending} onPress={connect}>Conectar Mercado Pago</Button>}
@@ -88,27 +98,26 @@ export default function Settings() {
 function ProfileForm({ profile, refresh }: { profile: Profile; refresh: () => Promise<void> }) {
   const [personType, setPersonType] = useState(profile.personType);
   const [pending, setPending] = useState(false);
-  const [error, setError] = useState('');
-  const [message, setMessage] = useState('');
+  const toast = useToast();
   const [resending, setResending] = useState(false);
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); if (pending) return;
     const form = event.currentTarget;
     const values = new FormData(form);
     const document = String(values.get('document') ?? '').replace(/\D/g, '');
-    setPending(true); setError(''); setMessage('');
+    setPending(true);
     try {
       await api('/seller/profile', { method: 'PATCH', body: JSON.stringify({ displayName: String(values.get('displayName')).trim(), personType, ...(document ? { document } : {}) }) });
       await refresh();
       const field = form.elements.namedItem('document') as HTMLInputElement;
       field.value = '';
-      setMessage('Perfil atualizado.');
-    } catch (err) { setError((err as Error).message); } finally { setPending(false); }
+      toast.success('Perfil atualizado.');
+    } catch (err) { toast.error((err as Error).message); } finally { setPending(false); }
   }
   async function resend() {
-    setResending(true); setMessage(''); setError('');
-    try { const response = await api<{ message: string }>('/auth/resend-verification', { method: 'POST' }); setMessage(response.message); }
-    catch (err) { setError((err as Error).message); } finally { setResending(false); }
+    setResending(true);
+    try { const response = await api<{ message: string }>('/auth/resend-verification', { method: 'POST' }); toast.success(response.message); }
+    catch (err) { toast.error((err as Error).message); } finally { setResending(false); }
   }
   return <form className="settings-form" onSubmit={submit}>
     <Field label="Nome do vendedor" hint="Nome usado para identificar seu negócio."><input name="displayName" defaultValue={profile.displayName} required minLength={2} maxLength={100} autoComplete="organization"/></Field>
@@ -116,7 +125,6 @@ function ProfileForm({ profile, refresh }: { profile: Profile; refresh: () => Pr
     {!profile.emailVerified ? <Button variant="outline" type="button" isPending={resending} onPress={resend}>Reenviar confirmação</Button> : null}
     <Field label="Tipo de pessoa"><select name="personType" value={personType} onChange={event => setPersonType(event.target.value as Profile['personType'])}><option value="individual">Pessoa física</option><option value="business">Pessoa jurídica</option></select></Field>
     <Field label={personType === 'individual' ? 'CPF' : 'CNPJ'} hint={profile.documentLast4 ? `Documento cadastrado: final ${profile.documentLast4}. Deixe em branco para manter ou informe um novo documento para substituir.` : 'Informe o documento do responsável pelo recebimento.'}><input key={personType} name="document" inputMode="numeric" maxLength={18} required={Boolean(profile.documentLast4 && personType !== profile.personType)} placeholder={personType === 'individual' ? '000.000.000-00' : '00.000.000/0000-00'} autoComplete="off"/></Field>
-    {error ? <Notice error message={error}/> : null}{message ? <Notice message={message}/> : null}
     <div className="settings-submit"><Submit pending={pending}>Salvar alterações</Submit></div>
   </form>;
 }

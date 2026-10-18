@@ -4,6 +4,7 @@ import { BrowserRouter, Routes, Route } from 'react-router';
 import { SWRConfig } from 'swr';
 import { api } from './lib/api';
 import { Pending } from './components/ui';
+import { ToastProvider } from './components/Toast';
 import './styles.css';
 const Auth = lazy(() => import('./pages/Auth'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
@@ -14,7 +15,7 @@ const BuyerOrder = lazy(() => import('./pages/BuyerOrder'));
 const Orders = lazy(() => import('./pages/Orders'));
 const PlatformSettings = lazy(() => import('./pages/PlatformSettings'));
 const Settings = lazy(() => import('./pages/Settings'));
-createRoot(document.getElementById('root')!).render(<React.StrictMode><SWRConfig value={{ fetcher: api, shouldRetryOnError: false }}><BrowserRouter><Suspense fallback={<Pending/>}><Routes>
+createRoot(document.getElementById('root')!).render(<React.StrictMode><SWRConfig value={{ fetcher: api, shouldRetryOnError: false }}><ToastProvider><BrowserRouter><Suspense fallback={<Pending/>}><Routes>
   <Route path="/checkout/:id" element={<Checkout/>}/>
   <Route path="/pedido" element={<BuyerOrder/>}/>
   <Route path="/pedidos" element={<Orders/>}/>
@@ -28,4 +29,4 @@ createRoot(document.getElementById('root')!).render(<React.StrictMode><SWRConfig
   <Route path="/verificar-email" element={<Access/>}/>
   <Route path="/redefinir-senha" element={<Access reset/>}/>
   <Route path="*" element={<main className="narrow"><h1>Esta página não está aqui.</h1><a href="/">Voltar para a nostore</a></main>}/>
-</Routes></Suspense></BrowserRouter></SWRConfig></React.StrictMode>);
+</Routes></Suspense></BrowserRouter></ToastProvider></SWRConfig></React.StrictMode>);
