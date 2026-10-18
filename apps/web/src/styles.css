@@ -31,6 +31,9 @@ h3 { font-weight: 550; }
 .field input::placeholder, .field textarea::placeholder { color: #858083; }
 .field small { color: #787174; line-height: 1.5; font-weight: 400; }
 form { display: flex; flex-direction: column; gap: 22px; }
+/* Fields live inside a fieldset, which would otherwise stack them flush against each other. */
+form fieldset { display: flex; flex-direction: column; gap: 22px; }
+form fieldset fieldset { gap: 18px; padding-top: 4px; }
 .check-row { display: flex; align-items: center; gap: 9px; font-size: 12px; line-height: 1.6; }
 input[type="checkbox"] { accent-color: var(--ink); width: 17px; height: 17px; flex-shrink: 0; }
 .notice { padding: 15px 18px; border: 1px solid #d6e3d9; border-radius: 10px; background: #f0f6f2; font-size: 13px; line-height: 1.6; margin-block: 10px; }
@@ -225,7 +228,7 @@ summary { cursor: pointer; min-height: 44px; padding-block: 12px; }
 .shipping-options { display: grid; gap: 8px; margin: 6px 0 14px; }
 .shipping-option { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font-size: 13px; }
 .shipping-option strong { font-weight: 600; }
-.parcel-fields { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+.parcel-fields { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px 16px; }
 .shipment-panel { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); display: grid; gap: 10px; }
 .shipment-panel h3 { font-size: 15px; }
 .shipment-panel .manual-post { display: grid; gap: 10px; max-width: 420px; }
