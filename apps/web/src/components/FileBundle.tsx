@@ -5,7 +5,7 @@ export interface BundleFile { id: string; name: string; size: number }
 export interface BundleProgress { done: number; total: number; name: string }
 
 export const BUNDLE_MAX_FILES = 40;
-export const BUNDLE_EXTENSIONS = ['.pdf', '.epub', '.zip', '.gp', '.gpx', '.gp3', '.gp4', '.gp5'];
+export const BUNDLE_EXTENSIONS = ['.pdf', '.epub', '.zip', '.jpg', '.jpeg', '.png', '.gp', '.gpx', '.gp3', '.gp4', '.gp5'];
 const MAX_FILE_BYTES = 100 * 1024 * 1024;
 const formatSize = (bytes: number) => bytes >= 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
 const extensionOf = (name: string) => (name.match(/\.[a-z0-9]+$/i)?.[0] ?? '').toLowerCase();
@@ -66,7 +66,7 @@ export function FileBundle({ kept, added, disabled, progress, onKeptChange, onAd
       role="button" tabIndex={disabled || full ? -1 : 0} aria-describedby={hintId}
     >
       <strong>{full ? `Limite de ${BUNDLE_MAX_FILES} arquivos atingido` : 'Arraste os arquivos aqui ou clique para escolher'}</strong>
-      <small id={hintId}>PDF, EPUB, ZIP ou Guitar Pro (.gp, .gpx, .gp5), até 100 MB cada. Dá para selecionar vários de uma vez e voltar depois para adicionar mais.</small>
+      <small id={hintId}>PDF, EPUB, ZIP, JPG, PNG ou Guitar Pro (.gp, .gpx, .gp5), até 100 MB cada. Dá para selecionar vários de uma vez e voltar depois para adicionar mais.</small>
       <input
         ref={inputRef} type="file" multiple accept={BUNDLE_EXTENSIONS.join(',')} disabled={disabled || full}
         onChange={event => { accept(Array.from(event.target.files ?? [])); event.target.value = ''; }}

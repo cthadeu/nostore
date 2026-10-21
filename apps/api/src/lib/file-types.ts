@@ -1,19 +1,23 @@
-// Digital products accept documents and Guitar Pro scores. Files are identified by their content, so
+// Digital products accept documents, images and Guitar Pro scores. Files are identified by their content, so
 // a renamed executable never passes; the extension only tells apart formats that share a container
 // (EPUB and Guitar Pro 7+ are both ZIP archives).
-export const DIGITAL_MEDIA_TYPES = ['application/pdf', 'application/zip', 'application/x-zip-compressed', 'application/epub+zip', 'application/octet-stream', 'application/x-guitar-pro'];
-export const DIGITAL_EXTENSIONS = ['.pdf', '.epub', '.zip', '.gp', '.gpx', '.gp3', '.gp4', '.gp5'];
-export const DIGITAL_FILE_HINT = 'PDF, EPUB, ZIP ou Guitar Pro (.gp, .gpx, .gp5)';
+export const DIGITAL_MEDIA_TYPES = ['application/pdf', 'application/zip', 'application/x-zip-compressed', 'application/epub+zip', 'application/octet-stream', 'application/x-guitar-pro', 'image/jpeg', 'image/png'];
+export const DIGITAL_EXTENSIONS = ['.pdf', '.epub', '.zip', '.jpg', '.jpeg', '.png', '.gp', '.gpx', '.gp3', '.gp4', '.gp5'];
+export const DIGITAL_FILE_HINT = 'PDF, EPUB, ZIP, JPG, PNG ou Guitar Pro (.gp, .gpx, .gp5)';
 // Guitar Pro 3 to 5 start with a Pascal-style version string; 32 bytes cover it with room to spare.
 export const DIGITAL_HEAD_BYTES = 32;
 
 const ZIP = Buffer.from([0x50, 0x4b, 0x03, 0x04]);
+const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const JPEG = Buffer.from([0xff, 0xd8, 0xff]);
 const GUITAR_PRO = 'FICHIER GUITAR PRO';
 const GUITAR_PRO_MIME = 'application/x-guitar-pro';
 
 export function detectDigitalMimeType(head: Buffer, filename: string): string | null {
   const extension = (filename.match(/\.[a-z0-9]+$/i)?.[0] ?? '').toLowerCase();
   if (head.subarray(0, 5).toString('latin1') === '%PDF-') return 'application/pdf';
+  if (head.subarray(0, 8).equals(PNG)) return 'image/png';
+  if (head.subarray(0, 3).equals(JPEG)) return 'image/jpeg';
   if (head.subarray(0, 4).equals(ZIP)) {
     // Guitar Pro 7+ (.gp) and EPUB are ZIP containers; only the extension distinguishes them.
     if (extension === '.gp') return GUITAR_PRO_MIME;
