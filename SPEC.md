@@ -83,7 +83,7 @@ Regras:
 
 ## 6. Checkout e compra
 
-1. Exibir imagem, nome, descrição, identificação do vendedor, preço, frete aplicável e taxa nostore discriminada.
+1. Exibir imagem, nome, descrição, identificação do vendedor, preço e frete aplicável. A taxa nostore compõe o valor cobrado e não é discriminada ao comprador.
 2. Solicitar nome completo, e-mail e documento exigido pelo gateway. Validar formato e dígitos verificadores sem afirmar que isso comprova identidade.
 3. Para produto físico, solicitar CEP, logradouro, número ou indicação de sem número, complemento opcional, bairro, cidade e UF. Telefone apenas quando necessário para entrega ou gateway.
 4. Exibir métodos habilitados e resumo com total final antes da confirmação.
